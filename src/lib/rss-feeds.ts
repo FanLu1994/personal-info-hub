@@ -112,8 +112,6 @@ export const RSS_FEEDS: RssFeed[] = [
   { url: "https://decohack.com/feed/", category: "中文技术博客" },
   { url: "https://sugarat.top/weekly.rss", category: "中文技术博客", name: "粥里有勺糖" },
   { url: "https://pythoncat.substack.com/feed", category: "中文技术博客", name: "Python猫" },
-  { url: "https://kill-the-newsletter.com/feeds/xcn3ldknjdme7yv7.xml", category: "中文技术博客" },
-  { url: "https://blog.lilydjwg.me/feed?code=c6f56c4214621ab98b86acbcae6b4405", category: "中文技术博客" },
   { url: "https://anotherdayu.com/feed/", category: "中文技术博客" },
   { url: "https://v2ex-create.nexmm.com/rss.xml", category: "中文技术博客", name: "V2EX Create" },
   { url: "https://mantyke.icu/weekly/index.xml", category: "中文技术博客" },

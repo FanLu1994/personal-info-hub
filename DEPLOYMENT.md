@@ -1,129 +1,187 @@
 # 部署说明
 
-## 当前状态
+## 架构概述
 
-### 本地开发
-- ✅ 开发服务器运行正常 (端口 4173)
-- ✅ 数据获取正常 (RSS/HN/GitHub)
-- ⚠️ Linux.do 返回 HTTP 403 (Cloudflare 防护，预期行为)
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  GitHub Actions │────▶│  GitHub main    │────▶│   Vercel App    │
+│  定时抓取数据    │     │  data/seed/*.json │    │  读取 raw URL   │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
+      │                        │                        │
+      │ 每日 08:00/10:30       │ commit/push            │ revalidate 5min
+      │ (北京时间)              │                        │
+      ▼                        ▼                        ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                         用户访问网站                              │
+│  Vercel 服务器自动从 GitHub raw URL 获取最新数据                   │
+│  无需重新部署，无需 Deploy Hook，无需任何 secret                    │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-### 数据源状态
-| 来源 | 状态 | 说明 |
-|------|------|------|
-| RSS | ✅ 正常 | 1700+ 文章已获取，15 源失败 (预期) |
-| Hacker News | ✅ 正常 | 30 热门帖子 |
-| GitHub Trending | ✅ 正常 | 12 热门仓库 |
-| Linux.do | ❌ 被阻止 | Cloudflare 403，需服务器端解决方案 |
+## 技术栈
 
-## 部署阻断因素
+- **前端**: Next.js 16 + TypeScript + Tailwind CSS 4
+- **数据存储**: 静态 JSON 文件 (`data/seed/articles.json`)
+- **数据获取**: GitHub Actions 定时抓取
+- **托管**: Vercel (或任何支持 Next.js 的平台)
 
-### 1. Vercel 部署
-**状态**: 需要用户操作
+## 数据源状态
 
-**阻断因素**:
-- Vercel MCP 需要认证 (`needsAuth` 状态)
-- 当前仓库在 Origin (cursor.com/git/...)，非 GitHub
-- Vercel 不直接支持 Origin 仓库连接
+| 来源 | 配置数量 | 说明 |
+|------|---------|------|
+| RSS | 136 | 国内外模型厂商、科技媒体、技术博客（移除了2个带访问码的私有源） |
+| Hacker News | 30 | 热门帖子 |
+| GitHub Trending | ~25 | 每日热门仓库 |
+| Linux.do | 待定 | Cloudflare 403，需登录 |
 
-**解决方案选项**:
-1. **用户在 Cursor Dashboard 中认证 Vercel MCP** - 然后可使用 MCP 工具部署
-2. **手动部署** - 用户克隆到 GitHub 并连接 Vercel
-3. **其他平台** - Railway, Fly.io 等支持直接 git 部署
+## 自动更新机制
 
-### 2. SQLite 生产兼容性
-**问题**: SQLite 在无服务器环境 (Vercel Functions) 中不持久
+### 无需 Deploy Hook 的架构
 
-**解决方案**:
-- **Vercel**: 使用 Vercel KV, Turso (LibSQL), 或 Neon Postgres
-- **传统服务器**: VPS/容器部署，SQLite 可直接使用
-- **推荐**: 对于当前数据量，Turso 或 Vercel KV 免费层足够
+传统方案需要 Deploy Hook 触发 Vercel 重新部署。本项目采用不同架构：
 
-### 3. 定时更新
-**当前状态**: ❌ 未自动实现，仅文档记录
+1. **GitHub Actions** 定时运行数据抓取脚本
+2. 抓取的数据 **commit 到 main 分支** 的 `data/seed/` 目录
+3. **Vercel 服务器端** 通过 GitHub raw URL 读取数据
+4. 使用 **Next.js revalidate** 缓存 (300秒)
 
-**实现方式**:
-- **Vercel Cron**: `vercel.json` 配置 cron 任务
-- **GitHub Actions**: 定时触发 `/api/refresh`
-- **外部服务**: cron-job.org, EasyCron 等
+这意味着：
+- ✅ 无需配置任何 secret
+- ✅ 无需 Deploy Hook
+- ✅ 数据自动更新
+- ✅ 最多 5 分钟延迟
 
-## 安全评估
+### 为什么不用 Deploy Hook
 
-### 刷新端点保护
-✅ **已实现**: 速率限制 (每分钟 3 次请求)
-- IP 基础限制
-- 429 响应包含 Retry-After
-- X-RateLimit-* 头信息
+由于 GitHub Actions 使用 `GITHUB_TOKEN` 的 push 不会触发外部 webhook：
+- [GitHub 官方文档](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow) 明确说明此行为
+- 这是防止递归工作流的安全设计
 
-### SSRF 防护
-✅ **已实现**: 
-- 白名单域名验证
-- 协议限制 (仅 HTTP/HTTPS)
-- 私有 IP 检测
-- 重定向验证
+本项目通过服务器端读取 GitHub raw URL 绕过此限制，无需任何额外配置。
 
-## 外部可访问 URL
+## 部署步骤
 
-**当前**: ❌ 无公网 URL
+### 1. Fork 或克隆仓库到 GitHub
 
-此 Cloud Agent 环境不提供公开可访问的 URL。`http://127.0.0.1:4173` 仅在此 VM 内部可访问。
+```bash
+# 如果从 Origin 克隆
+git clone https://cursor.com/git/FanLu1994/personal-info-hub
+cd personal-info-hub
+git remote set-url origin git@github.com:YOUR_USERNAME/personal-info-hub.git
+git push -u origin main
+```
 
-**获取公网 URL 的方式**:
-1. 部署到 Vercel/Netlify/Railway
-2. 使用用户自己的服务器部署
+### 2. 连接 Vercel
 
-## 部署步骤 (用户操作)
+1. 访问 https://vercel.com/new
+2. 导入 GitHub 仓库
+3. 框架预设选择 **Next.js**
+4. 点击 **Deploy**
 
-### 选项 A: Vercel 部署 (推荐)
+无需配置环境变量。
 
-1. **创建 GitHub 仓库**
-   ```bash
-   # 在本地机器上
-   git clone <origin-repo-url> info-digest
-   cd info-digest
-   git remote add github git@github.com:YOUR_USERNAME/info-digest.git
-   git push github main
-   ```
+### 3. 验证自动更新
 
-2. **连接 Vercel**
-   - 访问 https://vercel.com/new
-   - 导入 GitHub 仓库
-   - 框架预设选择 Next.js
+1. 在 GitHub Actions 页面手动运行 "Update Data" workflow
+2. 等待 workflow 完成
+3. 等待 ~5 分钟让 Vercel 缓存刷新
+4. 访问网站验证数据已更新
 
-3. **配置持久化存储**
-   - 添加 Vercel KV 或 Turso 数据库
-   - 更新数据库连接代码
+## 定时更新配置
 
-4. **配置定时任务**
-   ```json
-   // vercel.json
-   {
-     "crons": [
-       { "path": "/api/refresh?source=rss", "schedule": "0 0 * * 1-5" },
-       { "path": "/api/refresh?source=all", "schedule": "30 2 * * 1-5" }
-     ]
-   }
-   ```
+GitHub Actions workflow 配置了以下定时任务：
 
-### 选项 B: 传统服务器部署
+```yaml
+schedule:
+  # 周一至周五 UTC 00:00 = 北京时间 08:00
+  - cron: '0 0 * * 1-5'
+  # 周一至周五 UTC 02:30 = 北京时间 10:30
+  - cron: '30 2 * * 1-5'
+```
 
-1. 在 VPS 上克隆仓库
-2. `npm install && npm run build`
-3. 使用 PM2 或 systemd 运行 `npm start`
-4. 配置 nginx 反向代理
-5. 设置 cron 任务调用刷新 API
+可通过修改 `.github/workflows/update-data.yml` 调整更新频率。
 
-## 自动更新状态
+## CI 检查
 
-| 功能 | 状态 | 说明 |
-|------|------|------|
-| 手动刷新 | ✅ 已实现 | 前端按钮 + API |
-| 定时更新 | ❌ 待配置 | 需部署后配置 cron |
-| 聊天同步 | ❌ 未实现 | 无现有集成接口 |
+每次 PR 和 push 到 main 会运行：
 
-## 环境变量
+1. **TypeScript 类型检查** (`npm run typecheck`)
+2. **ESLint 代码检查** (`npm run lint`)
+3. **Next.js 构建** (`npm run build`)
+4. **数据验证** (检查 JSON 有效性和数据结构)
 
-生产部署需配置:
-```env
-DATA_DIR=/data  # 数据目录路径
-NODE_ENV=production
+## 本地开发
+
+```bash
+# 安装依赖
+npm install
+
+# 开发服务器
+npm run dev
+
+# 手动运行数据抓取
+npx tsx scripts/update-data.ts
+
+# 类型检查
+npm run typecheck
+
+# 构建
+npm run build
+```
+
+## 常见问题
+
+### Q: 数据更新后网站没有变化？
+
+A: Vercel 有 300 秒 (5分钟) 缓存。等待缓存过期后刷新页面。
+
+### Q: 某些 RSS 源抓取失败？
+
+A: 这是正常的。部分源可能：
+- 服务器暂时不可用
+- 有反爬机制
+- Feed 格式变更
+
+失败的源会在下次成功抓取时恢复。
+
+### Q: 如何添加新的 RSS 源？
+
+A: 编辑 `src/lib/rss-feeds.ts`，添加新的 feed：
+
+```typescript
+{ url: "https://example.com/feed.xml", category: "分类", name: "名称" },
+```
+
+### Q: 如何修改缓存时间？
+
+A: 编辑 `src/lib/data-loader.ts` 中的 `REVALIDATE_SECONDS` 常量。
+
+## 安全说明
+
+- ✅ 无需任何 secret 或 token
+- ✅ 仅读取固定白名单 URL (本仓库的 raw.githubusercontent.com)
+- ✅ 数据验证和超时保护
+- ✅ 本地 fallback 数据
+
+## 文件结构
+
+```
+├── .github/workflows/
+│   ├── ci.yml           # CI 检查
+│   └── update-data.yml  # 数据自动更新
+├── data/seed/
+│   ├── articles.json    # 文章数据
+│   └── statuses.json    # 数据源状态
+├── scripts/
+│   └── update-data.ts   # 数据抓取脚本
+├── src/
+│   ├── app/             # Next.js App Router
+│   ├── components/      # React 组件
+│   ├── hooks/           # 自定义 Hooks
+│   └── lib/
+│       ├── data-loader.ts  # 服务器端数据加载
+│       ├── data-store.ts   # 数据存储层
+│       ├── rss-feeds.ts    # RSS 源配置 (140个)
+│       └── types.ts        # TypeScript 类型
+└── DEPLOYMENT.md        # 本文档
 ```

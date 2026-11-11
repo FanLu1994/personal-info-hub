@@ -1,20 +1,12 @@
-import type { SourceType } from "./types";
+/**
+ * 数据存储层
+ * 
+ * 每次请求调用时检查TTL，必要时刷新数据
+ * 不使用进程单例缓存，依赖data-loader的TTL机制
+ */
 
-export interface Article {
-  id: string;
-  source_type: SourceType;
-  source_name: string;
-  category: string | null;
-  title: string;
-  summary: string | null;
-  content: string | null;
-  url: string;
-  author: string | null;
-  published_at: string | null;
-  fetched_at: string;
-  raw_data: string | null;
-  is_raw_headline: boolean;
-}
+import type { SourceType, Article } from "./types";
+import { loadArticles, loadStatuses, getTtlMs, getCacheAge } from "./data-loader";
 
 export interface SourceStatus {
   source_type: SourceType;
@@ -38,25 +30,7 @@ export interface DataStore {
   getCategories(sourceType?: SourceType): string[];
   getSourceStatuses(): SourceStatus[];
   getArticleCount(sourceType?: SourceType): number;
-}
-
-let seedArticles: Article[] | null = null;
-let seedStatuses: SourceStatus[] | null = null;
-
-async function loadSeedData(): Promise<void> {
-  if (seedArticles !== null) return;
-
-  try {
-    const articlesModule = await import("../../data/seed/articles.json");
-    const statusesModule = await import("../../data/seed/statuses.json");
-
-    seedArticles = articlesModule.default as Article[];
-    seedStatuses = statusesModule.default as SourceStatus[];
-  } catch {
-    console.warn("No seed data found, starting with empty data");
-    seedArticles = [];
-    seedStatuses = [];
-  }
+  getDataSource(): string;
 }
 
 function filterArticles(
@@ -110,17 +84,31 @@ function filterArticles(
   return filtered;
 }
 
-export class StaticDataStore implements DataStore {
+class DynamicDataStore implements DataStore {
   private articles: Article[] = [];
   private statuses: SourceStatus[] = [];
-  private initialized = false;
+  private dataSource: string = "unknown";
 
-  async initialize(): Promise<void> {
-    if (this.initialized) return;
-    await loadSeedData();
-    this.articles = seedArticles || [];
-    this.statuses = seedStatuses || [];
-    this.initialized = true;
+  constructor(
+    articles: Article[],
+    statuses: SourceStatus[],
+    articlesSource: string,
+    statusesSource: string
+  ) {
+    this.articles = articles;
+    this.statuses = statuses;
+    
+    const ttlSeconds = Math.round(getTtlMs() / 1000);
+    const cacheAgeMs = getCacheAge();
+    const cacheAgeSeconds = cacheAgeMs >= 0 ? Math.round(cacheAgeMs / 1000) : -1;
+    
+    if (articlesSource === "github") {
+      this.dataSource = `GitHub (TTL: ${ttlSeconds}s, age: ${cacheAgeSeconds}s)`;
+    } else if (articlesSource === "cache") {
+      this.dataSource = `缓存快照 (age: ${cacheAgeSeconds}s)`;
+    } else {
+      this.dataSource = "本地种子数据";
+    }
   }
 
   getArticles(options: {
@@ -137,6 +125,9 @@ export class StaticDataStore implements DataStore {
     filtered.sort((a, b) => {
       const dateA = a.published_at ? new Date(a.published_at).getTime() : 0;
       const dateB = b.published_at ? new Date(b.published_at).getTime() : 0;
+      if (dateA === 0 && dateB === 0) return 0;
+      if (dateA === 0) return 1;
+      if (dateB === 0) return -1;
       return dateB - dateA;
     });
 
@@ -171,14 +162,22 @@ export class StaticDataStore implements DataStore {
     }
     return this.articles.length;
   }
+
+  getDataSource(): string {
+    return this.dataSource;
+  }
 }
 
-let dataStoreInstance: StaticDataStore | null = null;
-
 export async function getDataStore(): Promise<DataStore> {
-  if (!dataStoreInstance) {
-    dataStoreInstance = new StaticDataStore();
-    await dataStoreInstance.initialize();
-  }
-  return dataStoreInstance;
+  const [articlesResult, statusesResult] = await Promise.all([
+    loadArticles(),
+    loadStatuses(),
+  ]);
+
+  return new DynamicDataStore(
+    articlesResult.data,
+    statusesResult.data as SourceStatus[],
+    articlesResult.source,
+    statusesResult.source
+  );
 }

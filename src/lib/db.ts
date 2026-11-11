@@ -1,3 +1,13 @@
+/**
+ * 数据库占位模块
+ * 
+ * 此模块为fetchers提供类型兼容的占位实现。
+ * 生产环境使用静态JSON数据，不需要运行时数据库。
+ * 
+ * 自动更新脚本 (scripts/update-data.ts) 直接操作JSON文件，
+ * 不通过此模块。
+ */
+
 import type { SourceType } from "./types";
 
 export interface ArticleInput {
@@ -16,9 +26,9 @@ export interface ArticleInput {
 }
 
 export function insertArticle(_article: ArticleInput): void {
-  throw new Error(
+  console.warn(
     "insertArticle is not available in static deployment. " +
-    "Data is pre-generated at build time."
+    "Use scripts/update-data.ts for data updates."
   );
 }
 
@@ -28,8 +38,8 @@ export function updateSourceStatus(
   _error?: string,
   _itemCount?: number
 ): void {
-  throw new Error(
+  console.warn(
     "updateSourceStatus is not available in static deployment. " +
-    "Data is pre-generated at build time."
+    "Use scripts/update-data.ts for data updates."
   );
 }

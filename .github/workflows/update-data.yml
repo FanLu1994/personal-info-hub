@@ -1,0 +1,109 @@
+name: Update Data
+
+on:
+  # 定时触发：工作日北京时间 08:00 和 10:30
+  # UTC 时间：00:00 和 02:30 (北京时间 = UTC + 8)
+  schedule:
+    # 周一至周五 UTC 00:00 = 北京时间 08:00
+    - cron: '0 0 * * 1-5'
+    # 周一至周五 UTC 02:30 = 北京时间 10:30
+    - cron: '30 2 * * 1-5'
+  
+  # 手动触发入口
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: '仅测试抓取，不提交更改'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run data update
+        id: update
+        run: |
+          echo "Starting data update at $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          npx tsx scripts/update-data.ts
+          
+          # 检查是否有更改
+          if git diff --quiet data/seed/; then
+            echo "changes=false" >> $GITHUB_OUTPUT
+            echo "No changes detected"
+          else
+            echo "changes=true" >> $GITHUB_OUTPUT
+            echo "Changes detected"
+            git diff --stat data/seed/
+          fi
+
+      - name: Commit and push changes
+        if: steps.update.outputs.changes == 'true' && github.event.inputs.dry_run != 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # 添加数据文件
+          git add data/seed/articles.json data/seed/statuses.json
+          
+          # 提交
+          TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M UTC')
+          git commit -m "chore: 自动更新数据 ($TIMESTAMP)" \
+            -m "由 GitHub Actions 自动抓取并更新" \
+            -m "" \
+            -m "触发方式: ${{ github.event_name }}" \
+            -m "运行ID: ${{ github.run_id }}"
+          
+          # 推送到 main 分支
+          # 注意: 使用 GITHUB_TOKEN 推送不会触发 Vercel 的 Git 集成部署
+          # 但 Vercel 服务器端会通过 revalidate 机制从 GitHub raw URL 获取最新数据
+          # 无需 Deploy Hook 或任何额外 secret
+          git push origin main
+
+      - name: Summary
+        run: |
+          echo "## 数据更新摘要" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **运行时间**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "- **北京时间**: $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_STEP_SUMMARY
+          echo "- **触发方式**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **检测到更改**: ${{ steps.update.outputs.changes }}" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            echo "- **模式**: 干运行（未提交更改）" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 数据统计" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          cat data/seed/articles.json | head -1 | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'Total articles: {len(d)}')" 2>/dev/null || echo "Unable to parse articles.json"
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 自动更新架构" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "数据更新后，Vercel 服务器端会通过 GitHub raw URL 获取最新数据：" >> $GITHUB_STEP_SUMMARY
+          echo "- 缓存时间: 300秒 (5分钟)" >> $GITHUB_STEP_SUMMARY
+          echo "- 无需 Deploy Hook" >> $GITHUB_STEP_SUMMARY
+          echo "- 无需任何 secret" >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,13 @@
+{
+  "version": "1.0.0",
+  "updated_at": "2026-11-11T00:00:00.000Z",
+  "description": "验证摘要索引文件 - 用于存储经过人工或模型核实的中文精选内容",
+  "schema": {
+    "article_id": "关联的文章ID (来自articles.json)",
+    "summary_zh": "经过验证的中文摘要",
+    "key_points": "可选的关键要点列表",
+    "verified_at": "验证时间ISO格式",
+    "verified_by": "验证来源标识 (human/model-name/chat-digest等)"
+  },
+  "items": []
+}

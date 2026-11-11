@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript check
+        run: npm run typecheck
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: TTL cache test
+        run: npm run test:ttl
+
+  data-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validate seed data
+        run: |
+          echo "Validating data/seed/articles.json..."
+          
+          if [ ! -f "data/seed/articles.json" ]; then
+            echo "❌ articles.json not found"
+            exit 1
+          fi
+          
+          if ! python3 -c "import json; json.load(open('data/seed/articles.json'))" 2>/dev/null; then
+            echo "❌ articles.json is not valid JSON"
+            exit 1
+          fi
+          
+          COUNT=$(python3 -c "import json; print(len(json.load(open('data/seed/articles.json'))))")
+          if [ "$COUNT" -lt 1 ]; then
+            echo "❌ articles.json is empty"
+            exit 1
+          fi
+          
+          echo "✓ articles.json: $COUNT articles"
+          
+          python3 << 'EOF'
+          import json
+          import sys
+          
+          with open('data/seed/articles.json') as f:
+              articles = json.load(f)
+          
+          required_fields = ['id', 'source_type', 'title', 'url']
+          valid_sources = ['rss', 'hackernews', 'github', 'linuxdo']
+          
+          errors = []
+          for i, article in enumerate(articles[:100]):
+              for field in required_fields:
+                  if field not in article:
+                      errors.append(f"Article {i}: missing {field}")
+              if article.get('source_type') not in valid_sources:
+                  errors.append(f"Article {i}: invalid source_type")
+              url = article.get('url', '')
+              if not url.startswith('http'):
+                  errors.append(f"Article {i}: invalid url")
+          
+          if errors:
+              for e in errors[:10]:
+                  print(f"❌ {e}")
+              sys.exit(1)
+          
+          print("✓ Data structure validation passed")
+          EOF
+          
+          echo ""
+          echo "Validating data/seed/statuses.json..."
+          
+          if [ ! -f "data/seed/statuses.json" ]; then
+            echo "❌ statuses.json not found"
+            exit 1
+          fi
+          
+          if ! python3 -c "import json; json.load(open('data/seed/statuses.json'))" 2>/dev/null; then
+            echo "❌ statuses.json is not valid JSON"
+            exit 1
+          fi
+          
+          echo "✓ statuses.json is valid"
+          echo "=== Data validation complete ==="
