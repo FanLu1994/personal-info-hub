@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "update-data": "tsx scripts/update-data.ts"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",
@@ -23,6 +24,7 @@
   "devDependencies": {
     "@tailwindcss/turbopack": "4.3.3",
     "@types/node": "^20",
+    "tsx": "^4.19.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",

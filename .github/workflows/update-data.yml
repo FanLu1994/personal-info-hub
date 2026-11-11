@@ -1,0 +1,105 @@
+name: Update Data
+
+on:
+  # 定时触发：工作日北京时间 08:00 和 10:30
+  # UTC 时间：00:00 和 02:30 (北京时间 = UTC + 8)
+  schedule:
+    # 周一至周五 UTC 00:00 = 北京时间 08:00
+    - cron: '0 0 * * 1-5'
+    # 周一至周五 UTC 02:30 = 北京时间 10:30
+    - cron: '30 2 * * 1-5'
+  
+  # 手动触发入口（仓库管理员使用）
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: '仅测试抓取，不提交更改'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+# 权限：需要 contents write 来推送更新
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # 使用默认 GITHUB_TOKEN
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run data update
+        id: update
+        run: |
+          echo "Starting data update at $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          npx tsx scripts/update-data.ts
+          
+          # 检查是否有更改
+          if git diff --quiet data/seed/; then
+            echo "changes=false" >> $GITHUB_OUTPUT
+            echo "No changes detected"
+          else
+            echo "changes=true" >> $GITHUB_OUTPUT
+            echo "Changes detected"
+            git diff --stat data/seed/
+          fi
+
+      - name: Commit and push changes
+        if: steps.update.outputs.changes == 'true' && github.event.inputs.dry_run != 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # 添加数据文件
+          git add data/seed/articles.json data/seed/statuses.json
+          
+          # 提交
+          TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M UTC')
+          git commit -m "chore: 自动更新数据 ($TIMESTAMP)" \
+            -m "由 GitHub Actions 自动抓取并更新" \
+            -m "" \
+            -m "触发方式: ${{ github.event_name }}" \
+            -m "运行ID: ${{ github.run_id }}"
+          
+          # 推送到 main 分支
+          # 注意：此推送使用 GITHUB_TOKEN，会触发 Vercel Git 部署
+          git push origin main
+          
+          echo "✓ Changes committed and pushed"
+          echo "Vercel deployment should be triggered automatically"
+
+      - name: Summary
+        run: |
+          echo "## 数据更新摘要" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **运行时间**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "- **北京时间**: $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_STEP_SUMMARY
+          echo "- **触发方式**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **检测到更改**: ${{ steps.update.outputs.changes }}" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            echo "- **模式**: 干运行（未提交更改）" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 数据文件统计" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          wc -l data/seed/*.json || true
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY

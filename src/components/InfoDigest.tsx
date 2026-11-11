@@ -1,14 +1,17 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { SourceTabs } from "./SourceTabs";
-import { StatusBar } from "./StatusBar";
-import { SearchFilters } from "./SearchFilters";
+import { Sidebar, MobileHeader } from "./Sidebar";
+import { Toolbar } from "./Toolbar";
 import { ArticleList } from "./ArticleList";
+import { ReadingPanel, MobileReadingPanel } from "./ReadingPanel";
+import { StatusIndicator } from "./StatusIndicator";
 import { useBookmarks } from "@/hooks/useBookmarks";
 import { usePreferences } from "@/hooks/usePreferences";
-import type { SourceType, Article } from "@/lib/types";
-import { Newspaper, Info } from "lucide-react";
+import { useFilters } from "@/hooks/useFilters";
+import { useTheme } from "@/hooks/useTheme";
+import type { SourceType, Article, ViewType } from "@/lib/types";
+import { SOURCE_LABELS } from "@/lib/types";
 
 interface SourceStatus {
   lastSuccessAt: string | null;
@@ -39,11 +42,15 @@ const DEFAULT_STATUS: SourceStatus = {
 };
 
 export function InfoDigest() {
-  const [activeSource, setActiveSource] = useState<SourceType | "all" | "bookmarks">("all");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewType>("all");
   const [articles, setArticles] = useState<Article[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedArticle, setSelectedArticle] = useState<Article | null>(null);
   const [statuses, setStatuses] = useState<Record<SourceType, SourceStatus>>({
     rss: DEFAULT_STATUS,
     linuxdo: DEFAULT_STATUS,
@@ -58,15 +65,17 @@ export function InfoDigest() {
     github: 0,
   });
   const [dataSource, setDataSource] = useState<string | undefined>();
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
 
-  const [search, setSearch] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState("");
   const offsetRef = useRef(0);
 
   const { bookmarks, toggleBookmark, isBookmarked, bookmarkCount } = useBookmarks();
-  const { markAsRead, isRead } = usePreferences();
+  const { markAsRead, markAllAsRead, isRead, prefs, setPrefs } = usePreferences();
+  const { filters, setFilters, resetFilters, getShareableUrl, hasActiveFilters, isInitialized } = useFilters();
+  const { effectiveTheme, toggleTheme, mounted } = useTheme();
+
+  const isBookmarksView = viewMode === "bookmarks";
+  const activeSource = isBookmarksView ? "all" : viewMode;
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -78,18 +87,31 @@ export function InfoDigest() {
         all: data.totalCount,
       });
       setDataSource(data.dataSource);
-    } catch (error) {
-      console.error("Failed to fetch status:", error);
+      
+      const latestSuccess = Object.values(data.statuses)
+        .map(s => s.lastSuccessAt)
+        .filter(Boolean)
+        .sort()
+        .pop();
+      setLastUpdated(latestSuccess || null);
+    } catch (err) {
+      console.error("Failed to fetch status:", err);
     }
   }, []);
 
   const fetchArticles = useCallback(
     async (reset = false) => {
-      if (activeSource === "bookmarks") {
+      if (isBookmarksView) {
         return;
       }
 
-      setIsLoading(true);
+      if (reset) {
+        setIsLoading(true);
+        setError(null);
+      } else {
+        setIsLoadingMore(true);
+      }
+      
       const currentOffset = reset ? 0 : offsetRef.current;
 
       try {
@@ -97,14 +119,16 @@ export function InfoDigest() {
         if (activeSource !== "all") {
           params.set("source", activeSource);
         }
-        if (search) params.set("search", search);
-        if (dateFrom) params.set("dateFrom", dateFrom);
-        if (dateTo) params.set("dateTo", dateTo);
-        if (selectedCategory) params.set("category", selectedCategory);
+        if (filters.search) params.set("search", filters.search);
+        if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
+        if (filters.dateTo) params.set("dateTo", filters.dateTo);
+        if (filters.category) params.set("category", filters.category);
         params.set("limit", "50");
         params.set("offset", String(currentOffset));
 
         const res = await fetch(`/api/articles?${params}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        
         const data: ArticlesData = await res.json();
 
         if (reset) {
@@ -117,36 +141,103 @@ export function InfoDigest() {
 
         setCategories(data.categories);
         setHasMore(data.hasMore);
-      } catch (error) {
-        console.error("Failed to fetch articles:", error);
+      } catch (err) {
+        console.error("Failed to fetch articles:", err);
+        setError(err instanceof Error ? err.message : "加载失败");
       } finally {
         setIsLoading(false);
+        setIsLoadingMore(false);
       }
     },
-    [activeSource, search, dateFrom, dateTo, selectedCategory]
+    [isBookmarksView, activeSource, filters.search, filters.dateFrom, filters.dateTo, filters.category]
   );
 
-  const bookmarkedArticles = useMemo(() => {
-    if (activeSource !== "bookmarks") return [];
-    return articles.filter((a) => bookmarks.has(a.id));
-  }, [activeSource, articles, bookmarks]);
+  const displayedArticles = useMemo(() => {
+    let result = articles;
 
-  const handleSourceChange = (source: SourceType | "all" | "bookmarks") => {
-    setActiveSource(source);
+    if (isBookmarksView) {
+      result = articles.filter((a) => bookmarks.has(a.id));
+    }
+
+    if (filters.readState === "unread") {
+      result = result.filter((a) => !isRead(a.id));
+    } else if (filters.readState === "read") {
+      result = result.filter((a) => isRead(a.id));
+    }
+
+    if (filters.sortBy === "source") {
+      result = [...result].sort((a, b) => a.source_type.localeCompare(b.source_type));
+    }
+    
+    if (filters.sortOrder === "asc") {
+      result = [...result].reverse();
+    }
+
+    return result;
+  }, [articles, isBookmarksView, bookmarks, filters.readState, filters.sortBy, filters.sortOrder, isRead]);
+
+  const unreadCount = useMemo(() => {
+    return articles.filter(a => !isRead(a.id)).length;
+  }, [articles, isRead]);
+
+  const handleSourceChange = (source: ViewType) => {
+    setViewMode(source);
+    if (source !== "bookmarks") {
+      setFilters({ source: source as SourceType | "all", category: "" });
+    }
     offsetRef.current = 0;
-    setSelectedCategory("");
+    setSelectedArticle(null);
+    
+    if (source === "bookmarks") {
+      fetchAllForBookmarks();
+    }
   };
 
-  const handleClearFilters = () => {
-    setSearch("");
-    setDateFrom("");
-    setDateTo("");
-    setSelectedCategory("");
-    offsetRef.current = 0;
+  const fetchAllForBookmarks = async () => {
+    if (bookmarks.size === 0) {
+      setArticles([]);
+      return;
+    }
+    
+    setIsLoading(true);
+    try {
+      const res = await fetch(`/api/articles?limit=2000`);
+      const data: ArticlesData = await res.json();
+      setArticles(data.articles);
+      setCategories(data.categories);
+      setHasMore(false);
+    } catch (err) {
+      console.error("Failed to fetch for bookmarks:", err);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleLoadMore = () => {
-    fetchArticles(false);
+  const handleMarkAllRead = () => {
+    const ids = displayedArticles.map(a => a.id);
+    markAllAsRead(ids);
+  };
+
+  const handleShare = async () => {
+    const url = getShareableUrl();
+    try {
+      await navigator.clipboard.writeText(url);
+      alert("链接已复制到剪贴板");
+    } catch {
+      prompt("复制以下链接分享当前筛选:", url);
+    }
+  };
+
+  const handleSelectArticle = (article: Article) => {
+    setSelectedArticle(article);
+    markAsRead(article.id);
+  };
+
+  const handleOpenExternal = () => {
+    if (selectedArticle) {
+      markAsRead(selectedArticle.id);
+      window.open(selectedArticle.url, "_blank", "noopener,noreferrer");
+    }
   };
 
   useEffect(() => {
@@ -154,106 +245,124 @@ export function InfoDigest() {
   }, [fetchStatus]);
 
   useEffect(() => {
+    if (!isInitialized) return;
+    
     offsetRef.current = 0;
-    if (activeSource !== "bookmarks") {
+    if (!isBookmarksView) {
       fetchArticles(true);
     }
-  }, [activeSource, search, dateFrom, dateTo, selectedCategory, fetchArticles]);
+  }, [isInitialized, isBookmarksView, activeSource, filters.search, filters.dateFrom, filters.dateTo, filters.category, fetchArticles]);
 
   useEffect(() => {
-    if (activeSource === "bookmarks" && bookmarks.size > 0) {
-      const fetchAllForBookmarks = async () => {
-        setIsLoading(true);
-        try {
-          const res = await fetch(`/api/articles?limit=1000`);
-          const data: ArticlesData = await res.json();
-          setArticles(data.articles);
-          setCategories(data.categories);
-        } catch (error) {
-          console.error("Failed to fetch for bookmarks:", error);
-        } finally {
-          setIsLoading(false);
-        }
-      };
+    if (isBookmarksView && bookmarks.size > 0 && isInitialized) {
       fetchAllForBookmarks();
     }
-  }, [activeSource, bookmarks.size]);
+  }, [isBookmarksView, isInitialized, bookmarks.size]);
 
-  const displayedArticles =
-    activeSource === "bookmarks" ? bookmarkedArticles : articles;
+  if (!mounted) {
+    return null;
+  }
+
+  const currentTitle = isBookmarksView 
+    ? "收藏" 
+    : activeSource === "all" 
+      ? "全部文章" 
+      : SOURCE_LABELS[activeSource as SourceType];
 
   return (
-    <div className="min-h-screen bg-neutral-50">
-      <header className="sticky top-0 z-50 bg-white border-b border-neutral-200 shadow-sm">
-        <div className="max-w-5xl mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-neutral-900 rounded-lg">
-                <Newspaper className="h-5 w-5 text-white" />
-              </div>
-              <div>
-                <h1 className="text-lg font-bold text-neutral-900">信息聚合</h1>
-                <p className="text-xs text-neutral-500">个人信息流阅读器</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="hidden sm:flex items-center gap-1 px-2 py-1 bg-amber-50 text-amber-700 rounded text-xs">
-                <Info className="h-3 w-3" />
-                <span>原始抓取，非AI摘要</span>
-              </div>
+    <div className="flex min-h-screen bg-[var(--color-bg-secondary)]">
+      {/* Sidebar */}
+      <Sidebar
+        activeSource={viewMode}
+        onSourceChange={handleSourceChange}
+        counts={counts}
+        bookmarkCount={bookmarkCount}
+        unreadCount={unreadCount}
+        theme={effectiveTheme}
+        onToggleTheme={toggleTheme}
+        lastUpdated={lastUpdated}
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+      />
+
+      {/* Main content */}
+      <main className="flex-1 min-w-0 flex flex-col">
+        <MobileHeader
+          onMenuClick={() => setSidebarOpen(true)}
+          title={currentTitle}
+        />
+
+        <div className="flex-1 flex">
+          {/* Article list */}
+          <div className="flex-1 min-w-0 bg-[var(--color-bg-primary)] flex flex-col">
+            <Toolbar
+              filters={filters}
+              onFiltersChange={setFilters}
+              onReset={resetFilters}
+              hasActiveFilters={hasActiveFilters}
+              categories={categories}
+              onMarkAllRead={handleMarkAllRead}
+              onMarkAllUnread={() => {}}
+              onShare={handleShare}
+              articleCount={displayedArticles.length}
+              compactMode={prefs.compactMode}
+              onToggleCompact={() => setPrefs({ compactMode: !prefs.compactMode })}
+            />
+
+            <StatusIndicator statuses={statuses} dataSource={dataSource} />
+
+            <div className="flex-1 overflow-y-auto scrollbar-thin">
+              <ArticleList
+                articles={displayedArticles}
+                isLoading={isLoading}
+                isLoadingMore={isLoadingMore}
+                hasMore={!isBookmarksView && hasMore}
+                selectedArticleId={selectedArticle?.id || null}
+                compactMode={prefs.compactMode}
+                showSource={activeSource === "all" || isBookmarksView}
+                isBookmarked={isBookmarked}
+                isRead={isRead}
+                onSelectArticle={handleSelectArticle}
+                onToggleBookmark={toggleBookmark}
+                onMarkAsRead={markAsRead}
+                onLoadMore={() => fetchArticles(false)}
+                error={error}
+              />
             </div>
           </div>
+
+          {/* Reading panel - desktop */}
+          <ReadingPanel
+            article={selectedArticle}
+            isBookmarked={selectedArticle ? isBookmarked(selectedArticle.id) : false}
+            isRead={selectedArticle ? isRead(selectedArticle.id) : false}
+            onClose={() => setSelectedArticle(null)}
+            onToggleBookmark={() => selectedArticle && toggleBookmark(selectedArticle.id)}
+            onMarkAsRead={() => selectedArticle && markAsRead(selectedArticle.id)}
+            onOpenExternal={handleOpenExternal}
+          />
         </div>
-
-        <SourceTabs
-          activeSource={activeSource}
-          onSourceChange={handleSourceChange}
-          counts={counts}
-          bookmarkCount={bookmarkCount}
-        />
-      </header>
-
-      <main className="max-w-5xl mx-auto bg-white min-h-screen shadow-sm">
-        <StatusBar statuses={statuses} dataSource={dataSource} />
-
-        <SearchFilters
-          search={search}
-          dateFrom={dateFrom}
-          dateTo={dateTo}
-          selectedCategory={selectedCategory}
-          categories={categories}
-          onSearchChange={setSearch}
-          onDateFromChange={setDateFrom}
-          onDateToChange={setDateTo}
-          onCategoryChange={setSelectedCategory}
-          onClear={handleClearFilters}
-        />
-
-        <ArticleList
-          articles={displayedArticles}
-          isLoading={isLoading}
-          hasMore={activeSource !== "bookmarks" && hasMore}
-          isBookmarked={isBookmarked}
-          isRead={isRead}
-          onToggleBookmark={toggleBookmark}
-          onMarkAsRead={markAsRead}
-          onLoadMore={handleLoadMore}
-          showSource={activeSource === "all" || activeSource === "bookmarks"}
-        />
       </main>
 
-      <footer className="max-w-5xl mx-auto py-8 px-4 text-center text-xs text-neutral-400">
-        <p>
-          数据来源：用户配置的 RSS 订阅、Linux.do、Hacker News、GitHub Trending
-        </p>
-        <p className="mt-1">
-          <strong>原始抓取标题</strong>：当前显示的是从公开 Feed/API 直接获取的原始标题和摘要，
-          <strong>非 AI 生成摘要</strong>。未来经过用户验证的精选摘要将单独标记。
-        </p>
-        <p className="mt-2 text-neutral-300">
-          本地书签和阅读状态保存在浏览器中。数据在部署时预生成。
-        </p>
-      </footer>
+      {/* Reading panel - mobile */}
+      <MobileReadingPanel
+        article={selectedArticle}
+        isBookmarked={selectedArticle ? isBookmarked(selectedArticle.id) : false}
+        isRead={selectedArticle ? isRead(selectedArticle.id) : false}
+        onClose={() => setSelectedArticle(null)}
+        onToggleBookmark={() => selectedArticle && toggleBookmark(selectedArticle.id)}
+        onMarkAsRead={() => selectedArticle && markAsRead(selectedArticle.id)}
+        onOpenExternal={handleOpenExternal}
+      />
+
+      {/* Footer note - only visible on mobile when no article selected */}
+      {!selectedArticle && (
+        <footer className="lg:hidden fixed bottom-0 left-0 right-0 p-3 bg-[var(--color-bg-primary)] border-t border-[var(--color-border-primary)] text-center">
+          <p className="text-xs text-[var(--color-text-tertiary)]">
+            书签和已读状态保存在此设备浏览器中
+          </p>
+        </footer>
+      )}
     </div>
   );
 }

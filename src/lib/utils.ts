@@ -1,77 +1,125 @@
-import { clsx, type ClassValue } from "clsx";
+import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function formatDate(dateString: string | null, showTime = false): string {
-  if (!dateString) return "未知时间";
+export function formatRelativeTime(dateStr: string | null | undefined): string {
+  if (!dateStr) return "未知";
+  
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return "未知";
+  
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffSec = Math.floor(diffMs / 1000);
+  const diffMin = Math.floor(diffSec / 60);
+  const diffHour = Math.floor(diffMin / 60);
+  const diffDay = Math.floor(diffHour / 24);
 
+  if (diffSec < 60) return "刚刚";
+  if (diffMin < 60) return `${diffMin} 分钟前`;
+  if (diffHour < 24) return `${diffHour} 小时前`;
+  if (diffDay < 7) return `${diffDay} 天前`;
+  if (diffDay < 30) return `${Math.floor(diffDay / 7)} 周前`;
+  if (diffDay < 365) return `${Math.floor(diffDay / 30)} 个月前`;
+  return `${Math.floor(diffDay / 365)} 年前`;
+}
+
+export function formatDate(dateStr: string | null | undefined): string {
+  if (!dateStr) return "未知";
+  
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return "未知";
+  
+  return date.toLocaleDateString("zh-CN", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+}
+
+export function formatDateTime(dateStr: string | null | undefined): string {
+  if (!dateStr) return "未知";
+  
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return "未知";
+  
+  return date.toLocaleString("zh-CN", {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+export function truncate(str: string, maxLength: number): string {
+  if (str.length <= maxLength) return str;
+  return str.slice(0, maxLength - 3) + "...";
+}
+
+export function sanitizeHtml(html: string): string {
+  return html
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+    .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, "")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#x27;/g, "'")
+    .replace(/&#x2F;/g, "/")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function isValidUrl(str: string): boolean {
   try {
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return "未知时间";
+    const url = new URL(str);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
 
-    const options: Intl.DateTimeFormatOptions = {
-      timeZone: "Asia/Shanghai",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    };
+export function generateId(prefix: string, content: string): string {
+  const hash = content
+    .split("")
+    .reduce((acc, char) => {
+      const chr = char.charCodeAt(0);
+      acc = ((acc << 5) - acc) + chr;
+      return acc & acc;
+    }, 0);
+  return `${prefix}-${Math.abs(hash).toString(36)}`;
+}
 
-    if (showTime) {
-      options.hour = "2-digit";
-      options.minute = "2-digit";
+export function debounce<T extends (...args: Parameters<T>) => void>(
+  func: T,
+  wait: number
+): (...args: Parameters<T>) => void {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  
+  return (...args: Parameters<T>) => {
+    if (timeoutId) clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => func(...args), wait);
+  };
+}
+
+export function throttle<T extends (...args: Parameters<T>) => void>(
+  func: T,
+  limit: number
+): (...args: Parameters<T>) => void {
+  let inThrottle = false;
+  
+  return (...args: Parameters<T>) => {
+    if (!inThrottle) {
+      func(...args);
+      inThrottle = true;
+      setTimeout(() => (inThrottle = false), limit);
     }
-
-    return date.toLocaleString("zh-CN", options);
-  } catch {
-    return "未知时间";
-  }
-}
-
-export function formatRelativeTime(dateString: string | null): string {
-  if (!dateString) return "未知时间";
-
-  try {
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return "未知时间";
-
-    const now = new Date();
-    const diff = now.getTime() - date.getTime();
-
-    const minutes = Math.floor(diff / 60000);
-    const hours = Math.floor(diff / 3600000);
-    const days = Math.floor(diff / 86400000);
-
-    if (minutes < 1) return "刚刚";
-    if (minutes < 60) return `${minutes} 分钟前`;
-    if (hours < 24) return `${hours} 小时前`;
-    if (days < 7) return `${days} 天前`;
-
-    return formatDate(dateString);
-  } catch {
-    return "未知时间";
-  }
-}
-
-export function formatShanghaiTime(dateString: string | null): string {
-  if (!dateString) return "未知";
-
-  try {
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return "未知";
-
-    return date.toLocaleString("zh-CN", {
-      timeZone: "Asia/Shanghai",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    });
-  } catch {
-    return "未知";
-  }
+  };
 }
