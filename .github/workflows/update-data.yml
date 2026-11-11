@@ -9,7 +9,7 @@ on:
     # 周一至周五 UTC 02:30 = 北京时间 10:30
     - cron: '30 2 * * 1-5'
   
-  # 手动触发入口（仓库管理员使用）
+  # 手动触发入口
   workflow_dispatch:
     inputs:
       dry_run:
@@ -21,14 +21,13 @@ on:
           - 'false'
           - 'true'
 
-# 权限：需要 contents write 来推送更新
 permissions:
   contents: write
 
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     
     steps:
       - name: Checkout repository
@@ -80,31 +79,10 @@ jobs:
             -m "运行ID: ${{ github.run_id }}"
           
           # 推送到 main 分支
+          # 注意: 使用 GITHUB_TOKEN 推送不会触发 Vercel 的 Git 集成部署
+          # 但 Vercel 服务器端会通过 revalidate 机制从 GitHub raw URL 获取最新数据
+          # 无需 Deploy Hook 或任何额外 secret
           git push origin main
-
-      # 触发 Vercel 部署
-      # 注意: GITHUB_TOKEN 的 push 不会触发 Vercel Git 集成部署
-      # 需要通过 Deploy Hook 手动触发
-      - name: Trigger Vercel deployment
-        if: steps.update.outputs.changes == 'true' && github.event.inputs.dry_run != 'true'
-        env:
-          VERCEL_DEPLOY_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK }}
-        run: |
-          if [ -n "$VERCEL_DEPLOY_HOOK" ]; then
-            echo "Triggering Vercel deployment via Deploy Hook..."
-            response=$(curl -s -X POST "$VERCEL_DEPLOY_HOOK")
-            echo "Vercel response: $response"
-            echo "✓ Vercel deployment triggered"
-          else
-            echo "⚠ VERCEL_DEPLOY_HOOK secret not configured"
-            echo "To enable automatic Vercel deployment:"
-            echo "1. Go to Vercel Dashboard → Project → Settings → Git → Deploy Hooks"
-            echo "2. Create a hook for 'main' branch"
-            echo "3. Add the URL as VERCEL_DEPLOY_HOOK secret in GitHub repository"
-            echo ""
-            echo "Without Deploy Hook, data is committed but Vercel won't auto-deploy."
-            echo "Manual deployment or next human push will include these changes."
-          fi
 
       - name: Summary
         run: |
@@ -123,12 +101,9 @@ jobs:
           cat data/seed/articles.json | head -1 | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'Total articles: {len(d)}')" 2>/dev/null || echo "Unable to parse articles.json"
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 部署说明" >> $GITHUB_STEP_SUMMARY
+          echo "### 自动更新架构" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "由于 GitHub Actions 使用 GITHUB_TOKEN 的 push 不会触发 Vercel Git 集成部署，" >> $GITHUB_STEP_SUMMARY
-          echo "需要配置 Deploy Hook 来触发自动部署。" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**配置步骤**:" >> $GITHUB_STEP_SUMMARY
-          echo "1. Vercel Dashboard → Project → Settings → Git → Deploy Hooks" >> $GITHUB_STEP_SUMMARY
-          echo "2. 创建 'main' 分支的 Hook" >> $GITHUB_STEP_SUMMARY
-          echo "3. 将 URL 添加为 GitHub Secret: \`VERCEL_DEPLOY_HOOK\`" >> $GITHUB_STEP_SUMMARY
+          echo "数据更新后，Vercel 服务器端会通过 GitHub raw URL 获取最新数据：" >> $GITHUB_STEP_SUMMARY
+          echo "- 缓存时间: 300秒 (5分钟)" >> $GITHUB_STEP_SUMMARY
+          echo "- 无需 Deploy Hook" >> $GITHUB_STEP_SUMMARY
+          echo "- 无需任何 secret" >> $GITHUB_STEP_SUMMARY

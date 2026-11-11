@@ -1,20 +1,13 @@
-import type { SourceType } from "./types";
+/**
+ * 数据存储层
+ * 
+ * 支持两种数据来源:
+ * 1. GitHub raw URL (服务器端，带 revalidate 缓存)
+ * 2. 本地 seed 数据 (fallback)
+ */
 
-export interface Article {
-  id: string;
-  source_type: SourceType;
-  source_name: string;
-  category: string | null;
-  title: string;
-  summary: string | null;
-  content: string | null;
-  url: string;
-  author: string | null;
-  published_at: string | null;
-  fetched_at: string;
-  raw_data: string | null;
-  is_raw_headline: boolean;
-}
+import type { SourceType, Article } from "./types";
+import { loadArticles, loadStatuses, REVALIDATE_SECONDS } from "./data-loader";
 
 export interface SourceStatus {
   source_type: SourceType;
@@ -38,25 +31,7 @@ export interface DataStore {
   getCategories(sourceType?: SourceType): string[];
   getSourceStatuses(): SourceStatus[];
   getArticleCount(sourceType?: SourceType): number;
-}
-
-let seedArticles: Article[] | null = null;
-let seedStatuses: SourceStatus[] | null = null;
-
-async function loadSeedData(): Promise<void> {
-  if (seedArticles !== null) return;
-
-  try {
-    const articlesModule = await import("../../data/seed/articles.json");
-    const statusesModule = await import("../../data/seed/statuses.json");
-
-    seedArticles = articlesModule.default as Article[];
-    seedStatuses = statusesModule.default as SourceStatus[];
-  } catch {
-    console.warn("No seed data found, starting with empty data");
-    seedArticles = [];
-    seedStatuses = [];
-  }
+  getDataSource(): string;
 }
 
 function filterArticles(
@@ -110,16 +85,34 @@ function filterArticles(
   return filtered;
 }
 
-export class StaticDataStore implements DataStore {
+export class DynamicDataStore implements DataStore {
   private articles: Article[] = [];
   private statuses: SourceStatus[] = [];
+  private dataSource: string = "unknown";
   private initialized = false;
 
   async initialize(): Promise<void> {
     if (this.initialized) return;
-    await loadSeedData();
-    this.articles = seedArticles || [];
-    this.statuses = seedStatuses || [];
+
+    const [articlesResult, statusesResult] = await Promise.all([
+      loadArticles(),
+      loadStatuses(),
+    ]);
+
+    this.articles = articlesResult.data;
+    this.statuses = statusesResult.data as SourceStatus[];
+
+    if (articlesResult.source === "github" && statusesResult.source === "github") {
+      this.dataSource = `GitHub (revalidate: ${REVALIDATE_SECONDS}s)`;
+    } else if (articlesResult.source === "seed" && statusesResult.source === "seed") {
+      this.dataSource = "本地种子数据";
+      if (articlesResult.error) {
+        this.dataSource += ` (${articlesResult.error})`;
+      }
+    } else {
+      this.dataSource = "混合数据源";
+    }
+
     this.initialized = true;
   }
 
@@ -137,6 +130,9 @@ export class StaticDataStore implements DataStore {
     filtered.sort((a, b) => {
       const dateA = a.published_at ? new Date(a.published_at).getTime() : 0;
       const dateB = b.published_at ? new Date(b.published_at).getTime() : 0;
+      if (dateA === 0 && dateB === 0) return 0;
+      if (dateA === 0) return 1;
+      if (dateB === 0) return -1;
       return dateB - dateA;
     });
 
@@ -171,14 +167,24 @@ export class StaticDataStore implements DataStore {
     }
     return this.articles.length;
   }
+
+  getDataSource(): string {
+    return this.dataSource;
+  }
 }
 
-let dataStoreInstance: StaticDataStore | null = null;
+let dataStoreInstance: DynamicDataStore | null = null;
 
 export async function getDataStore(): Promise<DataStore> {
   if (!dataStoreInstance) {
-    dataStoreInstance = new StaticDataStore();
-    await dataStoreInstance.initialize();
+    dataStoreInstance = new DynamicDataStore();
   }
+  await dataStoreInstance.initialize();
+  return dataStoreInstance;
+}
+
+export async function refreshDataStore(): Promise<DataStore> {
+  dataStoreInstance = new DynamicDataStore();
+  await dataStoreInstance.initialize();
   return dataStoreInstance;
 }

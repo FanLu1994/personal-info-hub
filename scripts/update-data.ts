@@ -13,20 +13,28 @@
  * - 原子写入（写入临时文件后rename）
  * - 损坏数据不覆盖已有数据
  * - 部分失败保留最后成功数据
+ * 
+ * 自动更新架构:
+ * - GitHub Actions 定时运行此脚本，提交更新到 main 分支
+ * - Vercel 服务器端从 GitHub raw URL 读取数据，带 revalidate 缓存
+ * - 无需 Deploy Hook 或任何 secret
  */
 
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 
+// 导入完整的 RSS 配置
+import { RSS_FEEDS } from "../src/lib/rss-feeds";
+
 const DATA_DIR = path.join(process.cwd(), "data", "seed");
 const ARTICLES_FILE = path.join(DATA_DIR, "articles.json");
 const STATUSES_FILE = path.join(DATA_DIR, "statuses.json");
 
-const MAX_TOTAL_ARTICLES = 3000;
-const RSS_FETCH_TIMEOUT = 15000;
-const RSS_MAX_CONCURRENT = 5;
-const RSS_MAX_ITEMS_PER_FEED = 20;
+const MAX_TOTAL_ARTICLES = 5000;
+const RSS_FETCH_TIMEOUT = 12000;
+const RSS_MAX_CONCURRENT = 8;
+const RSS_MAX_ITEMS_PER_FEED = 15;
 
 type SourceType = "rss" | "linuxdo" | "hackernews" | "github";
 
@@ -99,7 +107,7 @@ async function safeFetch(url: string, timeout: number, options: RequestInit = {}
       ...options,
       signal: controller.signal,
       headers: {
-        "User-Agent": "InfoDigest/2.0 (Personal Information Aggregator)",
+        "User-Agent": "Mozilla/5.0 (compatible; InfoDigest/2.0; +https://github.com/FanLu1994/personal-info-hub)",
         ...options.headers,
       },
     });
@@ -108,51 +116,6 @@ async function safeFetch(url: string, timeout: number, options: RequestInit = {}
     clearTimeout(timeoutId);
   }
 }
-
-// ============ RSS FEEDS 配置 (从 src/lib/rss-feeds.ts 同步) ============
-const RSS_FEEDS: RssFeed[] = [
-  // 国内模型厂商
-  { url: "https://qwenlm.github.io/blog/index.xml", category: "国内模型厂商", name: "通义千问" },
-  { url: "https://wechat2rss.bestblogs.dev/feed/1709da4f538d4ce4fb6d7a8ba1a5a1c297919601.xml", category: "国内模型厂商", name: "DeepSeek" },
-  { url: "https://wechat2rss.bestblogs.dev/feed/433d2134dca54d80804daf32e8be546155be3300.xml", category: "国内模型厂商", name: "智谱" },
-  { url: "https://wechat2rss.bestblogs.dev/feed/c5c43d4bc17bae656763859ed0903bb6314ec6fe.xml", category: "国内模型厂商", name: "Kimi" },
-  
-  // 国外模型厂商
-  { url: "https://openai.com/news/rss.xml", category: "国外模型厂商", name: "OpenAI" },
-  { url: "https://huggingface.co/blog/feed.xml", category: "国外模型厂商", name: "Hugging Face" },
-  { url: "https://mistral.ai/news/rss", category: "国外模型厂商", name: "Mistral" },
-  { url: "https://ollama.com/blog/rss.xml", category: "国外模型厂商", name: "Ollama" },
-  { url: "https://rsshub.bestblogs.dev/anthropic/news", category: "国外模型厂商", name: "Anthropic" },
-  
-  // 海外科技媒体
-  { url: "https://feeds.arstechnica.com/arstechnica/index", category: "海外科技媒体", name: "Ars Technica" },
-  { url: "https://www.theverge.com/rss/index.xml", category: "海外科技媒体", name: "The Verge" },
-  { url: "https://www.wired.com/feed/rss", category: "海外科技媒体", name: "WIRED" },
-  { url: "https://techcrunch.com/feed/", category: "海外科技媒体", name: "TechCrunch" },
-  { url: "https://www.404media.co/rss/", category: "海外科技媒体", name: "404 Media" },
-  { url: "https://www.techmeme.com/feed.xml", category: "海外科技媒体", name: "Techmeme" },
-  
-  // 中文技术博客 - 精选稳定源
-  { url: "https://blog.codingnow.com/atom.xml", category: "中文技术博客", name: "云风" },
-  { url: "https://coolshell.cn/feed", category: "中文技术博客", name: "酷壳" },
-  { url: "https://tech.meituan.com/feed/", category: "中文技术博客", name: "美团技术" },
-  { url: "https://tonybai.com/feed/", category: "中文技术博客", name: "Tony Bai" },
-  { url: "https://tw93.fun/feed.xml", category: "中文技术博客", name: "Tw93" },
-  { url: "https://weekly.tw93.fun/rss.xml", category: "中文技术博客", name: "潮流周刊" },
-  { url: "https://www.zhangxinxu.com/wordpress/feed/", category: "中文技术博客", name: "张鑫旭" },
-  { url: "https://diygod.cc/feed", category: "中文技术博客", name: "DIYgod" },
-  { url: "https://www.ruanyifeng.com/blog/atom.xml", category: "中文技术博客", name: "阮一峰" },
-  { url: "https://onevcat.com/feed.xml", category: "中文技术博客", name: "OneV's Den" },
-  { url: "https://wiki.eryajf.net/rss.xml", category: "中文技术博客", name: "二丫讲梵" },
-  { url: "https://www.pseudoyu.com/feed.xml", category: "中文技术博客", name: "pseudoyu" },
-  { url: "https://sugarat.top/weekly.rss", category: "中文技术博客", name: "粥里有勺糖" },
-  { url: "https://aigc-weekly.agi.li/rss.xml", category: "中文技术博客", name: "AIGC周刊" },
-  
-  // 英文技术博客
-  { url: "https://krebsonsecurity.com/feed/", category: "英文技术博客", name: "Krebs Security" },
-  { url: "https://daringfireball.net/feeds/main", category: "英文技术博客", name: "Daring Fireball" },
-  { url: "https://mitchellh.com/feed.xml", category: "英文技术博客", name: "Mitchell Hashimoto" },
-];
 
 function parseRssItem(itemXml: string, feedName: string, category: string): Article | null {
   const titleMatch = itemXml.match(/<title>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/i);
@@ -252,7 +215,8 @@ async function fetchSingleRssFeed(feed: RssFeed): Promise<{ articles: Article[];
 }
 
 async function fetchRssFeeds(): Promise<FetchResult> {
-  console.log(`Fetching RSS feeds (${RSS_FEEDS.length} sources)...`);
+  console.log(`\n=== 抓取RSS数据 ===`);
+  console.log(`配置了 ${RSS_FEEDS.length} 个RSS源`);
   
   const allArticles: Article[] = [];
   const failedFeeds: string[] = [];
@@ -262,6 +226,11 @@ async function fetchRssFeeds(): Promise<FetchResult> {
   // 分批并发处理
   for (let i = 0; i < RSS_FEEDS.length; i += RSS_MAX_CONCURRENT) {
     const batch = RSS_FEEDS.slice(i, i + RSS_MAX_CONCURRENT);
+    const batchNum = Math.floor(i / RSS_MAX_CONCURRENT) + 1;
+    const totalBatches = Math.ceil(RSS_FEEDS.length / RSS_MAX_CONCURRENT);
+    
+    process.stdout.write(`  批次 ${batchNum}/${totalBatches}...`);
+    
     const results = await Promise.all(
       batch.map(async (feed) => {
         const result = await fetchSingleRssFeed(feed);
@@ -269,25 +238,36 @@ async function fetchRssFeeds(): Promise<FetchResult> {
       })
     );
     
+    let batchSuccess = 0;
     for (const { feed, result } of results) {
       if (result.error) {
         feedsFailed++;
         failedFeeds.push(`${feed.name || feed.url}: ${result.error}`);
       } else {
         feedsSuccess++;
+        batchSuccess++;
         allArticles.push(...result.articles);
       }
     }
     
-    // 批次间短暂延迟，避免过于激进
+    console.log(` ${batchSuccess}/${batch.length} OK`);
+    
+    // 批次间短暂延迟
     if (i + RSS_MAX_CONCURRENT < RSS_FEEDS.length) {
-      await new Promise(r => setTimeout(r, 500));
+      await new Promise(r => setTimeout(r, 300));
     }
   }
   
-  console.log(`  RSS: ${feedsSuccess}/${RSS_FEEDS.length} feeds OK, ${allArticles.length} articles`);
+  console.log(`\nRSS汇总: ${feedsSuccess}/${RSS_FEEDS.length} 源成功, ${allArticles.length} 篇文章`);
+  
   if (feedsFailed > 0) {
-    console.log(`  Failed feeds: ${failedFeeds.slice(0, 5).join(", ")}${failedFeeds.length > 5 ? ` (+${failedFeeds.length - 5} more)` : ""}`);
+    console.log(`\n失败的源 (${feedsFailed}个):`);
+    for (const failed of failedFeeds.slice(0, 20)) {
+      console.log(`  - ${failed}`);
+    }
+    if (failedFeeds.length > 20) {
+      console.log(`  ... 还有 ${failedFeeds.length - 20} 个`);
+    }
   }
   
   return {
@@ -304,7 +284,7 @@ async function fetchHackerNews(): Promise<FetchResult> {
   const articles: Article[] = [];
   
   try {
-    console.log("Fetching Hacker News...");
+    console.log("\n=== 抓取Hacker News ===");
     const response = await safeFetch("https://hacker-news.firebaseio.com/v0/topstories.json", 30000);
     
     if (!response.ok) {
@@ -363,11 +343,11 @@ async function fetchHackerNews(): Promise<FetchResult> {
       });
     }
     
-    console.log(`  HN: ${articles.length} items`);
+    console.log(`HN: ${articles.length} 条`);
     return { success: true, articles };
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
-    console.error(`  HN error: ${error}`);
+    console.error(`HN错误: ${error}`);
     return { success: false, articles: [], error };
   }
 }
@@ -376,7 +356,7 @@ async function fetchGitHubTrending(): Promise<FetchResult> {
   const articles: Article[] = [];
   
   try {
-    console.log("Fetching GitHub Trending...");
+    console.log("\n=== 抓取GitHub Trending ===");
     const response = await safeFetch("https://github.com/trending?since=daily", 30000, {
       headers: {
         Accept: "text/html,application/xhtml+xml",
@@ -442,18 +422,18 @@ async function fetchGitHubTrending(): Promise<FetchResult> {
       });
     }
     
-    console.log(`  GitHub: ${articles.length} repos`);
+    console.log(`GitHub: ${articles.length} 个仓库`);
     return { success: true, articles };
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
-    console.error(`  GitHub error: ${error}`);
+    console.error(`GitHub错误: ${error}`);
     return { success: false, articles: [], error };
   }
 }
 
 async function fetchLinuxdo(): Promise<FetchResult> {
   try {
-    console.log("Fetching Linux.do...");
+    console.log("\n=== 抓取Linux.do ===");
     const response = await safeFetch("https://linux.do/top.rss?period=daily", 15000, {
       headers: {
         Accept: "application/rss+xml, application/xml, text/xml",
@@ -478,11 +458,11 @@ async function fetchLinuxdo(): Promise<FetchResult> {
       }
     }
     
-    console.log(`  Linux.do: ${articles.length} items`);
+    console.log(`Linux.do: ${articles.length} 条`);
     return { success: true, articles };
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
-    console.error(`  Linux.do error: ${error}`);
+    console.error(`Linux.do错误: ${error}`);
     return { success: false, articles: [], error };
   }
 }
@@ -495,10 +475,10 @@ function loadExistingData(): { articles: Article[]; statuses: SourceStatus[] } {
     if (fs.existsSync(ARTICLES_FILE)) {
       const data = fs.readFileSync(ARTICLES_FILE, "utf-8");
       articles = JSON.parse(data);
-      console.log(`Loaded ${articles.length} existing articles`);
+      console.log(`已加载 ${articles.length} 条现有文章`);
     }
   } catch (err) {
-    console.error("Failed to load existing articles:", err);
+    console.error("加载现有文章失败:", err);
   }
   
   try {
@@ -507,7 +487,7 @@ function loadExistingData(): { articles: Article[]; statuses: SourceStatus[] } {
       statuses = JSON.parse(data);
     }
   } catch (err) {
-    console.error("Failed to load existing statuses:", err);
+    console.error("加载状态失败:", err);
   }
   
   return { articles, statuses };
@@ -550,7 +530,7 @@ function mergeArticles(existing: Article[], newArticles: Article[]): Article[] {
     const dateA = a.published_at ? new Date(a.published_at).getTime() : 0;
     const dateB = b.published_at ? new Date(b.published_at).getTime() : 0;
     if (dateA === 0 && dateB === 0) return 0;
-    if (dateA === 0) return 1; // 无日期的放后面
+    if (dateA === 0) return 1;
     if (dateB === 0) return -1;
     return dateB - dateA;
   });
@@ -583,9 +563,8 @@ function updateStatus(
 
 async function main() {
   console.log("=".repeat(60));
-  console.log("Starting data update at", new Date().toISOString());
+  console.log("数据更新开始于", new Date().toISOString());
   console.log("=".repeat(60));
-  console.log("");
   
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -596,7 +575,7 @@ async function main() {
   let allNewArticles: Article[] = [];
   let statuses = existingStatuses;
   
-  // === RSS ===
+  // === RSS (完整140个源) ===
   const rssResult = await fetchRssFeeds();
   allNewArticles = allNewArticles.concat(rssResult.articles);
   statuses = updateStatus(
@@ -646,48 +625,54 @@ async function main() {
     ldResult.articles.length
   );
   
-  console.log("");
+  console.log("\n" + "=".repeat(60));
+  console.log("合并摘要");
   console.log("=".repeat(60));
-  console.log("Merge Summary");
-  console.log("=".repeat(60));
-  console.log(`New articles fetched: ${allNewArticles.length}`);
-  console.log(`Existing articles: ${existingArticles.length}`);
+  console.log(`新抓取文章: ${allNewArticles.length}`);
+  console.log(`现有文章: ${existingArticles.length}`);
   
   const mergedArticles = mergeArticles(existingArticles, allNewArticles);
-  console.log(`After merge & dedup: ${mergedArticles.length}`);
+  console.log(`合并去重后: ${mergedArticles.length}`);
   
   // 防止空数据覆盖
   if (mergedArticles.length === 0 && existingArticles.length > 0) {
-    console.error("\n❌ ERROR: Refusing to overwrite existing data with empty result");
+    console.error("\n❌ 错误: 拒绝用空结果覆盖现有数据");
     process.exit(1);
   }
   
-  console.log("\nWriting data files...");
+  console.log("\n写入数据文件...");
   atomicWrite(ARTICLES_FILE, JSON.stringify(mergedArticles, null, 2));
   atomicWrite(STATUSES_FILE, JSON.stringify(statuses, null, 2));
   
-  console.log("");
+  console.log("\n" + "=".repeat(60));
+  console.log("✓ 数据更新完成!");
   console.log("=".repeat(60));
-  console.log("✓ Data update complete!");
-  console.log("=".repeat(60));
-  console.log(`  Total articles: ${mergedArticles.length}`);
-  console.log(`  RSS: ${rssResult.feedsSuccess}/${RSS_FEEDS.length} feeds, ${rssResult.articles.length} articles`);
-  console.log(`  HN: ${hnResult.articles.length} articles`);
-  console.log(`  GitHub: ${ghResult.articles.length} repos`);
-  console.log(`  Linux.do: ${ldResult.articles.length} articles`);
+  console.log(`  总文章数: ${mergedArticles.length}`);
+  console.log(`  RSS: ${rssResult.feedsSuccess}/${RSS_FEEDS.length} 源, ${rssResult.articles.length} 篇`);
+  console.log(`  HN: ${hnResult.articles.length} 篇`);
+  console.log(`  GitHub: ${ghResult.articles.length} 个仓库`);
+  console.log(`  Linux.do: ${ldResult.articles.length} 篇`);
   
   const hasErrors = statuses.some(s => s.last_error);
   if (hasErrors) {
-    console.log("\n⚠ Sources with errors:");
+    console.log("\n⚠ 有错误的数据源:");
     for (const status of statuses) {
       if (status.last_error) {
         console.log(`  - ${status.source_type}: ${status.last_error}`);
       }
     }
   }
+  
+  // 输出失败的RSS源列表（用于文档）
+  if (rssResult.failedFeeds && rssResult.failedFeeds.length > 0) {
+    console.log("\n📋 失败的RSS源详情:");
+    for (const failed of rssResult.failedFeeds) {
+      console.log(`  - ${failed}`);
+    }
+  }
 }
 
 main().catch((err) => {
-  console.error("Fatal error:", err);
+  console.error("致命错误:", err);
   process.exit(1);
 });
