@@ -1,13 +1,12 @@
 /**
  * 数据存储层
  * 
- * 支持两种数据来源:
- * 1. GitHub raw URL (服务器端，带 revalidate 缓存)
- * 2. 本地 seed 数据 (fallback)
+ * 每次请求调用时检查TTL，必要时刷新数据
+ * 不使用进程单例缓存，依赖data-loader的TTL机制
  */
 
 import type { SourceType, Article } from "./types";
-import { loadArticles, loadStatuses, REVALIDATE_SECONDS } from "./data-loader";
+import { loadArticles, loadStatuses, getTtlMs, getCacheAge } from "./data-loader";
 
 export interface SourceStatus {
   source_type: SourceType;
@@ -85,35 +84,31 @@ function filterArticles(
   return filtered;
 }
 
-export class DynamicDataStore implements DataStore {
+class DynamicDataStore implements DataStore {
   private articles: Article[] = [];
   private statuses: SourceStatus[] = [];
   private dataSource: string = "unknown";
-  private initialized = false;
 
-  async initialize(): Promise<void> {
-    if (this.initialized) return;
-
-    const [articlesResult, statusesResult] = await Promise.all([
-      loadArticles(),
-      loadStatuses(),
-    ]);
-
-    this.articles = articlesResult.data;
-    this.statuses = statusesResult.data as SourceStatus[];
-
-    if (articlesResult.source === "github" && statusesResult.source === "github") {
-      this.dataSource = `GitHub (revalidate: ${REVALIDATE_SECONDS}s)`;
-    } else if (articlesResult.source === "seed" && statusesResult.source === "seed") {
-      this.dataSource = "本地种子数据";
-      if (articlesResult.error) {
-        this.dataSource += ` (${articlesResult.error})`;
-      }
+  constructor(
+    articles: Article[],
+    statuses: SourceStatus[],
+    articlesSource: string,
+    statusesSource: string
+  ) {
+    this.articles = articles;
+    this.statuses = statuses;
+    
+    const ttlSeconds = Math.round(getTtlMs() / 1000);
+    const cacheAgeMs = getCacheAge();
+    const cacheAgeSeconds = cacheAgeMs >= 0 ? Math.round(cacheAgeMs / 1000) : -1;
+    
+    if (articlesSource === "github") {
+      this.dataSource = `GitHub (TTL: ${ttlSeconds}s, age: ${cacheAgeSeconds}s)`;
+    } else if (articlesSource === "cache") {
+      this.dataSource = `缓存快照 (age: ${cacheAgeSeconds}s)`;
     } else {
-      this.dataSource = "混合数据源";
+      this.dataSource = "本地种子数据";
     }
-
-    this.initialized = true;
   }
 
   getArticles(options: {
@@ -173,18 +168,16 @@ export class DynamicDataStore implements DataStore {
   }
 }
 
-let dataStoreInstance: DynamicDataStore | null = null;
-
 export async function getDataStore(): Promise<DataStore> {
-  if (!dataStoreInstance) {
-    dataStoreInstance = new DynamicDataStore();
-  }
-  await dataStoreInstance.initialize();
-  return dataStoreInstance;
-}
+  const [articlesResult, statusesResult] = await Promise.all([
+    loadArticles(),
+    loadStatuses(),
+  ]);
 
-export async function refreshDataStore(): Promise<DataStore> {
-  dataStoreInstance = new DynamicDataStore();
-  await dataStoreInstance.initialize();
-  return dataStoreInstance;
+  return new DynamicDataStore(
+    articlesResult.data,
+    statusesResult.data as SourceStatus[],
+    articlesResult.source,
+    statusesResult.source
+  );
 }

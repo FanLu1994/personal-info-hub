@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDataStore } from "@/lib/data-store";
 import type { SourceType } from "@/lib/types";
-import { REVALIDATE_SECONDS } from "@/lib/data-loader";
+import { getTtlMs } from "@/lib/data-loader";
 
 const SOURCE_TYPES: SourceType[] = ["rss", "linuxdo", "hackernews", "github"];
 
@@ -50,7 +50,7 @@ export async function GET() {
       counts,
       totalCount: Object.values(counts).reduce((a, b) => a + b, 0),
       dataSource: store.getDataSource(),
-      note: `数据自动从 GitHub main 分支获取，缓存 ${REVALIDATE_SECONDS} 秒。Actions 定时更新数据，无需重新部署。`,
+      note: `数据自动从 GitHub main 分支获取，缓存 ${Math.round(getTtlMs() / 1000)} 秒。Actions 定时更新数据，无需重新部署。`,
     });
   } catch (error) {
     console.error("Error fetching status:", error);

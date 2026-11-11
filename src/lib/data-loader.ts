@@ -3,15 +3,15 @@
  * 
  * 架构说明:
  * - GitHub Actions 定时提交更新的 data/seed/articles.json 到 main 分支
- * - Vercel 服务器端从 GitHub raw URL 读取数据，使用 revalidate 缓存
- * - 如果 GitHub 请求失败，回退到本地 seed 数据
+ * - Vercel 服务器端从 GitHub raw URL 读取数据，使用内存TTL缓存
+ * - 如果 GitHub 请求失败，回退到最近成功快照或本地 seed 数据
  * - 无需 Deploy Hook，无需任何 secret
  * 
- * 安全特性:
- * - 仅读取固定白名单 URL (本仓库的 raw.githubusercontent.com)
- * - 不暴露任何认证信息
- * - 数据有效性验证
- * - 超时和错误处理
+ * TTL 机制:
+ * - 默认 300 秒 (5分钟) 缓存
+ * - 支持注入短 TTL 用于测试
+ * - 并发请求去重（同一时刻只发起一个请求）
+ * - 失败时保留最近成功的内存快照
  */
 
 import type { Article } from "./types";
@@ -28,7 +28,17 @@ const ARTICLES_URL = `${GITHUB_RAW_BASE}/data/seed/articles.json`;
 const STATUSES_URL = `${GITHUB_RAW_BASE}/data/seed/statuses.json`;
 
 const FETCH_TIMEOUT_MS = 8000;
-const REVALIDATE_SECONDS = 300;
+const DEFAULT_TTL_MS = 300_000;
+
+let configuredTtlMs = DEFAULT_TTL_MS;
+
+export function setTtlMs(ttlMs: number): void {
+  configuredTtlMs = ttlMs;
+}
+
+export function getTtlMs(): number {
+  return configuredTtlMs;
+}
 
 interface SourceStatus {
   source_type: string;
@@ -38,12 +48,27 @@ interface SourceStatus {
   item_count: number;
 }
 
-interface DataLoadResult<T> {
+interface CachedData<T> {
   data: T;
-  source: "github" | "seed";
-  error?: string;
-  stale?: boolean;
+  fetchedAt: number;
+  source: "github" | "seed" | "cache";
 }
+
+interface DataSnapshot {
+  articles: CachedData<Article[]> | null;
+  statuses: CachedData<SourceStatus[]> | null;
+  lastSuccessfulArticles: Article[] | null;
+  lastSuccessfulStatuses: SourceStatus[] | null;
+}
+
+const snapshot: DataSnapshot = {
+  articles: null,
+  statuses: null,
+  lastSuccessfulArticles: null,
+  lastSuccessfulStatuses: null,
+};
+
+let fetchInProgress: Promise<void> | null = null;
 
 async function fetchWithTimeout(
   url: string,
@@ -59,29 +84,47 @@ async function fetchWithTimeout(
         Accept: "application/json",
         "User-Agent": "InfoDigest/2.0",
       },
-      next: {
-        revalidate: REVALIDATE_SECONDS,
-      },
-    } as RequestInit);
+      cache: "no-store",
+    });
     return response;
   } finally {
     clearTimeout(timeoutId);
   }
 }
 
+function validateArticle(article: unknown, index: number): string | null {
+  if (typeof article !== "object" || article === null) {
+    return `Article ${index}: not an object`;
+  }
+  const a = article as Record<string, unknown>;
+  
+  if (typeof a.id !== "string" || !a.id) {
+    return `Article ${index}: missing or invalid id`;
+  }
+  if (typeof a.title !== "string" || !a.title) {
+    return `Article ${index}: missing or invalid title`;
+  }
+  if (typeof a.url !== "string" || !a.url.startsWith("http")) {
+    return `Article ${index}: missing or invalid url`;
+  }
+  if (!["rss", "hackernews", "github", "linuxdo"].includes(a.source_type as string)) {
+    return `Article ${index}: invalid source_type`;
+  }
+  return null;
+}
+
 function validateArticles(data: unknown): data is Article[] {
   if (!Array.isArray(data)) return false;
   if (data.length === 0) return true;
   
-  const sample = data[0];
-  return (
-    typeof sample === "object" &&
-    sample !== null &&
-    "id" in sample &&
-    "title" in sample &&
-    "url" in sample &&
-    "source_type" in sample
-  );
+  for (let i = 0; i < Math.min(data.length, 100); i++) {
+    const error = validateArticle(data[i], i);
+    if (error) {
+      console.warn(`Article validation failed: ${error}`);
+      return false;
+    }
+  }
+  return true;
 }
 
 function validateStatuses(data: unknown): data is SourceStatus[] {
@@ -96,88 +139,148 @@ function validateStatuses(data: unknown): data is SourceStatus[] {
   );
 }
 
-export async function loadArticles(): Promise<DataLoadResult<Article[]>> {
+function isCacheValid<T>(cached: CachedData<T> | null): boolean {
+  if (!cached) return false;
+  const age = Date.now() - cached.fetchedAt;
+  return age < configuredTtlMs;
+}
+
+async function fetchFromGitHub(): Promise<void> {
+  const now = Date.now();
+  
   try {
-    const response = await fetchWithTimeout(ARTICLES_URL, FETCH_TIMEOUT_MS);
+    const [articlesResponse, statusesResponse] = await Promise.all([
+      fetchWithTimeout(ARTICLES_URL, FETCH_TIMEOUT_MS),
+      fetchWithTimeout(STATUSES_URL, FETCH_TIMEOUT_MS),
+    ]);
 
-    if (!response.ok) {
-      console.warn(`GitHub articles fetch failed: HTTP ${response.status}`);
-      return {
-        data: seedArticles as Article[],
-        source: "seed",
-        error: `GitHub HTTP ${response.status}`,
-        stale: true,
-      };
+    if (!articlesResponse.ok || !statusesResponse.ok) {
+      throw new Error(`HTTP error: articles=${articlesResponse.status}, statuses=${statusesResponse.status}`);
     }
 
-    const data = await response.json();
+    const [articlesData, statusesData] = await Promise.all([
+      articlesResponse.json(),
+      statusesResponse.json(),
+    ]);
 
-    if (!validateArticles(data)) {
-      console.warn("GitHub articles validation failed");
-      return {
-        data: seedArticles as Article[],
-        source: "seed",
-        error: "Validation failed",
-        stale: true,
-      };
+    if (!validateArticles(articlesData)) {
+      throw new Error("Articles validation failed");
     }
 
-    return {
-      data,
+    if (!validateStatuses(statusesData)) {
+      throw new Error("Statuses validation failed");
+    }
+
+    if (articlesData.length === 0 && snapshot.lastSuccessfulArticles && snapshot.lastSuccessfulArticles.length > 0) {
+      console.warn("GitHub returned empty articles, keeping last successful snapshot");
+      return;
+    }
+
+    snapshot.articles = {
+      data: articlesData,
+      fetchedAt: now,
       source: "github",
     };
+    snapshot.statuses = {
+      data: statusesData,
+      fetchedAt: now,
+      source: "github",
+    };
+
+    snapshot.lastSuccessfulArticles = articlesData;
+    snapshot.lastSuccessfulStatuses = statusesData;
+
+    console.log(`Data refreshed from GitHub: ${articlesData.length} articles`);
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    console.warn(`GitHub articles fetch error: ${errorMsg}`);
-    return {
-      data: seedArticles as Article[],
-      source: "seed",
-      error: errorMsg,
-      stale: true,
-    };
+    console.warn(`GitHub fetch failed: ${errorMsg}`);
+
+    if (snapshot.lastSuccessfulArticles && snapshot.lastSuccessfulStatuses) {
+      console.log("Using last successful snapshot");
+      snapshot.articles = {
+        data: snapshot.lastSuccessfulArticles,
+        fetchedAt: now,
+        source: "cache",
+      };
+      snapshot.statuses = {
+        data: snapshot.lastSuccessfulStatuses,
+        fetchedAt: now,
+        source: "cache",
+      };
+    } else {
+      console.log("Using seed data as fallback");
+      snapshot.articles = {
+        data: seedArticles as Article[],
+        fetchedAt: now,
+        source: "seed",
+      };
+      snapshot.statuses = {
+        data: seedStatuses as SourceStatus[],
+        fetchedAt: now,
+        source: "seed",
+      };
+    }
   }
 }
 
-export async function loadStatuses(): Promise<DataLoadResult<SourceStatus[]>> {
+async function ensureFreshData(): Promise<void> {
+  if (isCacheValid(snapshot.articles) && isCacheValid(snapshot.statuses)) {
+    return;
+  }
+
+  if (fetchInProgress) {
+    await fetchInProgress;
+    return;
+  }
+
+  fetchInProgress = fetchFromGitHub();
   try {
-    const response = await fetchWithTimeout(STATUSES_URL, FETCH_TIMEOUT_MS);
-
-    if (!response.ok) {
-      console.warn(`GitHub statuses fetch failed: HTTP ${response.status}`);
-      return {
-        data: seedStatuses as SourceStatus[],
-        source: "seed",
-        error: `GitHub HTTP ${response.status}`,
-        stale: true,
-      };
-    }
-
-    const data = await response.json();
-
-    if (!validateStatuses(data)) {
-      console.warn("GitHub statuses validation failed");
-      return {
-        data: seedStatuses as SourceStatus[],
-        source: "seed",
-        error: "Validation failed",
-        stale: true,
-      };
-    }
-
-    return {
-      data,
-      source: "github",
-    };
-  } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    console.warn(`GitHub statuses fetch error: ${errorMsg}`);
-    return {
-      data: seedStatuses as SourceStatus[],
-      source: "seed",
-      error: errorMsg,
-      stale: true,
-    };
+    await fetchInProgress;
+  } finally {
+    fetchInProgress = null;
   }
 }
 
-export { REVALIDATE_SECONDS, GITHUB_RAW_BASE };
+export async function loadArticles(): Promise<{ data: Article[]; source: string }> {
+  await ensureFreshData();
+  
+  if (snapshot.articles) {
+    return {
+      data: snapshot.articles.data,
+      source: snapshot.articles.source,
+    };
+  }
+
+  return {
+    data: seedArticles as Article[],
+    source: "seed",
+  };
+}
+
+export async function loadStatuses(): Promise<{ data: SourceStatus[]; source: string }> {
+  await ensureFreshData();
+  
+  if (snapshot.statuses) {
+    return {
+      data: snapshot.statuses.data,
+      source: snapshot.statuses.source,
+    };
+  }
+
+  return {
+    data: seedStatuses as SourceStatus[],
+    source: "seed",
+  };
+}
+
+export function getCacheAge(): number {
+  if (!snapshot.articles) return -1;
+  return Date.now() - snapshot.articles.fetchedAt;
+}
+
+export function invalidateCache(): void {
+  snapshot.articles = null;
+  snapshot.statuses = null;
+}
+
+export { DEFAULT_TTL_MS, GITHUB_RAW_BASE };

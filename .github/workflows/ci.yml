@@ -33,6 +33,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: TTL cache test
+        run: npm run test:ttl
+
   data-validation:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -50,19 +53,16 @@ jobs:
         run: |
           echo "Validating data/seed/articles.json..."
           
-          # 检查文件存在
           if [ ! -f "data/seed/articles.json" ]; then
             echo "❌ articles.json not found"
             exit 1
           fi
           
-          # 检查JSON有效性
           if ! python3 -c "import json; json.load(open('data/seed/articles.json'))" 2>/dev/null; then
             echo "❌ articles.json is not valid JSON"
             exit 1
           fi
           
-          # 检查数组不为空（至少有种子数据）
           COUNT=$(python3 -c "import json; print(len(json.load(open('data/seed/articles.json'))))")
           if [ "$COUNT" -lt 1 ]; then
             echo "❌ articles.json is empty"
@@ -71,34 +71,34 @@ jobs:
           
           echo "✓ articles.json: $COUNT articles"
           
-          # 验证数据结构
           python3 << 'EOF'
-import json
-import sys
-
-with open('data/seed/articles.json') as f:
-    articles = json.load(f)
-
-required_fields = ['id', 'source_type', 'title', 'url']
-valid_sources = ['rss', 'hackernews', 'github', 'linuxdo']
-
-errors = []
-for i, article in enumerate(articles[:100]):  # 检查前100条
-    for field in required_fields:
-        if field not in article:
-            errors.append(f"Article {i}: missing {field}")
-    if article.get('source_type') not in valid_sources:
-        errors.append(f"Article {i}: invalid source_type '{article.get('source_type')}'")
-
-if errors:
-    for e in errors[:10]:
-        print(f"❌ {e}")
-    if len(errors) > 10:
-        print(f"... and {len(errors) - 10} more errors")
-    sys.exit(1)
-
-print("✓ Data structure validation passed")
-EOF
+          import json
+          import sys
+          
+          with open('data/seed/articles.json') as f:
+              articles = json.load(f)
+          
+          required_fields = ['id', 'source_type', 'title', 'url']
+          valid_sources = ['rss', 'hackernews', 'github', 'linuxdo']
+          
+          errors = []
+          for i, article in enumerate(articles[:100]):
+              for field in required_fields:
+                  if field not in article:
+                      errors.append(f"Article {i}: missing {field}")
+              if article.get('source_type') not in valid_sources:
+                  errors.append(f"Article {i}: invalid source_type")
+              url = article.get('url', '')
+              if not url.startswith('http'):
+                  errors.append(f"Article {i}: invalid url")
+          
+          if errors:
+              for e in errors[:10]:
+                  print(f"❌ {e}")
+              sys.exit(1)
+          
+          print("✓ Data structure validation passed")
+          EOF
           
           echo ""
           echo "Validating data/seed/statuses.json..."
@@ -114,6 +114,4 @@ EOF
           fi
           
           echo "✓ statuses.json is valid"
-          
-          echo ""
           echo "=== Data validation complete ==="
