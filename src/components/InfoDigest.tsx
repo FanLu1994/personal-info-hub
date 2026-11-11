@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Sidebar, MobileHeader } from "./Sidebar";
 import { Toolbar } from "./Toolbar";
 import { ArticleList } from "./ArticleList";
-import { ReadingPanel, MobileReadingPanel } from "./ReadingPanel";
+import { ReadingPanel, MobileReadingPanel, OverlayReadingPanel } from "./ReadingPanel";
 import { StatusIndicator } from "./StatusIndicator";
 import { useBookmarks } from "@/hooks/useBookmarks";
 import { usePreferences } from "@/hooks/usePreferences";
@@ -331,7 +331,7 @@ export function InfoDigest() {
             </div>
           </div>
 
-          {/* Reading panel - desktop */}
+          {/* Reading panel - large desktop only (xl+) */}
           <ReadingPanel
             article={selectedArticle}
             isBookmarked={selectedArticle ? isBookmarked(selectedArticle.id) : false}
@@ -344,7 +344,18 @@ export function InfoDigest() {
         </div>
       </main>
 
-      {/* Reading panel - mobile */}
+      {/* Reading panel - medium desktop overlay (md to xl) */}
+      <OverlayReadingPanel
+        article={selectedArticle}
+        isBookmarked={selectedArticle ? isBookmarked(selectedArticle.id) : false}
+        isRead={selectedArticle ? isRead(selectedArticle.id) : false}
+        onClose={() => setSelectedArticle(null)}
+        onToggleBookmark={() => selectedArticle && toggleBookmark(selectedArticle.id)}
+        onMarkAsRead={() => selectedArticle && markAsRead(selectedArticle.id)}
+        onOpenExternal={handleOpenExternal}
+      />
+
+      {/* Reading panel - mobile (below md) */}
       <MobileReadingPanel
         article={selectedArticle}
         isBookmarked={selectedArticle ? isBookmarked(selectedArticle.id) : false}
@@ -357,7 +368,7 @@ export function InfoDigest() {
 
       {/* Footer note - only visible on mobile when no article selected */}
       {!selectedArticle && (
-        <footer className="lg:hidden fixed bottom-0 left-0 right-0 p-3 bg-[var(--color-bg-primary)] border-t border-[var(--color-border-primary)] text-center">
+        <footer className="md:hidden fixed bottom-0 left-0 right-0 p-3 bg-[var(--color-bg-primary)] border-t border-[var(--color-border-primary)] text-center">
           <p className="text-xs text-[var(--color-text-tertiary)]">
             书签和已读状态保存在此设备浏览器中
           </p>

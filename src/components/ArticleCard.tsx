@@ -43,7 +43,7 @@ function GitHubMeta({ rawData }: { rawData: Record<string, unknown> }) {
   const forks = rawData.forks as number | undefined;
 
   return (
-    <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--color-text-tertiary)]">
+    <div className="flex flex-wrap items-center gap-3 text-[13px] text-[var(--color-text-secondary)]">
       {language && (
         <span className="flex items-center gap-1">
           <span className="w-2 h-2 rounded-full bg-[var(--color-accent-primary)]" />
@@ -77,7 +77,7 @@ function HNMeta({ rawData }: { rawData: Record<string, unknown> }) {
   const hnUrl = rawData.hn_url as string | undefined;
 
   return (
-    <div className="flex items-center gap-3 text-xs text-[var(--color-text-tertiary)]">
+    <div className="flex items-center gap-3 text-[13px] text-[var(--color-text-secondary)]">
       {score !== undefined && (
         <span className="flex items-center gap-1">
           <TrendingUp className="h-3 w-3" />
@@ -127,50 +127,45 @@ export function ArticleCard({
     <article
       onClick={handleClick}
       className={cn(
-        "group relative px-4 py-3 cursor-pointer transition-all",
+        "group relative px-4 py-4 cursor-pointer transition-all",
         "border-l-3 border-l-transparent",
         "hover:bg-[var(--color-bg-hover)]",
         isSelected && "bg-[var(--color-bg-hover)] border-l-[var(--color-accent-primary)]",
-        isRead && "opacity-60"
+        isRead && "article-read"
       )}
     >
       <div className="flex gap-3">
         <div className="flex-1 min-w-0">
-          {/* Badges */}
-          <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+          {/* Badges - 只保留来源标签，减少视觉噪声 */}
+          <div className="flex flex-wrap items-center gap-1.5 mb-2">
             {showSource && (
-              <Badge variant="secondary" className="text-[10px]">
+              <Badge variant="secondary" className="text-[11px] font-medium">
                 {SOURCE_LABELS[article.source_type]}
               </Badge>
             )}
             {article.category && (
-              <Badge variant="outline" className="text-[10px]">
+              <Badge variant="outline" className="text-[11px]">
                 {article.category}
               </Badge>
             )}
-            {article.is_raw_headline && (
-              <Badge variant="warning" className="text-[10px]">
-                原始标题
-              </Badge>
-            )}
             {isRead && (
-              <CheckCircle className="h-3 w-3 text-[var(--color-text-tertiary)]" />
+              <CheckCircle className="h-3.5 w-3.5 text-[var(--color-text-tertiary)]" />
             )}
           </div>
 
-          {/* Title */}
+          {/* Title - 增大字号 */}
           <h3
             className={cn(
-              "text-sm font-medium leading-snug line-clamp-2 mb-1",
-              isRead ? "text-[var(--color-text-tertiary)]" : "text-[var(--color-text-primary)]"
+              "article-title text-[16px] font-medium leading-snug line-clamp-2 mb-2",
+              isRead ? "text-[var(--color-text-secondary)]" : "text-[var(--color-text-primary)]"
             )}
           >
             {article.title}
           </h3>
 
-          {/* Summary */}
+          {/* Summary - 增大字号，改善行高 */}
           {article.summary && (
-            <p className="text-sm text-[var(--color-text-secondary)] line-clamp-2 mb-2 leading-relaxed">
+            <p className="text-[14px] text-[var(--color-text-secondary)] line-clamp-2 mb-3 leading-[1.65]">
               {article.summary.replace(/^\[.*?\]\s*/, "")}
             </p>
           )}
@@ -187,19 +182,19 @@ export function ArticleCard({
             </div>
           )}
 
-          {/* Meta */}
-          <div className="flex items-center gap-3 text-xs text-[var(--color-text-tertiary)]">
+          {/* Meta - 略增字号 */}
+          <div className="flex items-center gap-3 text-[13px] text-[var(--color-text-tertiary)]">
             <span className="flex items-center gap-1">
-              <Clock className="h-3 w-3" />
+              <Clock className="h-3.5 w-3.5" />
               {formatRelativeTime(article.published_at)}
             </span>
             {article.author && (
-              <span className="flex items-center gap-1 truncate max-w-[120px]">
-                <User className="h-3 w-3" />
+              <span className="flex items-center gap-1 truncate max-w-[140px]">
+                <User className="h-3.5 w-3.5" />
                 {article.author}
               </span>
             )}
-            <span className="truncate max-w-[120px] hidden sm:block">
+            <span className="truncate max-w-[140px] hidden sm:block">
               {article.source_name}
             </span>
           </div>
@@ -220,7 +215,7 @@ export function ArticleCard({
             title={isBookmarked ? "取消收藏" : "收藏"}
           >
             <Bookmark
-              className="h-3.5 w-3.5"
+              className="h-4 w-4"
               fill={isBookmarked ? "currentColor" : "none"}
             />
           </Button>
@@ -230,7 +225,7 @@ export function ArticleCard({
             onClick={handleOpenExternal}
             title="在新标签页打开"
           >
-            <ExternalLink className="h-3.5 w-3.5" />
+            <ExternalLink className="h-4 w-4" />
           </Button>
         </div>
       </div>
@@ -258,30 +253,30 @@ export function CompactArticleCard({
     <article
       onClick={handleClick}
       className={cn(
-        "group relative px-4 py-2 cursor-pointer transition-all",
+        "group relative px-4 py-3 cursor-pointer transition-all",
         "border-l-3 border-l-transparent",
         "hover:bg-[var(--color-bg-hover)]",
         isSelected && "bg-[var(--color-bg-hover)] border-l-[var(--color-accent-primary)]",
-        isRead && "opacity-60"
+        isRead && "article-read"
       )}
     >
       <div className="flex items-center gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             {showSource && (
-              <Badge variant="secondary" className="text-[10px] shrink-0">
+              <Badge variant="secondary" className="text-[11px] shrink-0 font-medium">
                 {SOURCE_LABELS[article.source_type]}
               </Badge>
             )}
             <h3
               className={cn(
-                "text-sm font-medium line-clamp-1 flex-1",
-                isRead ? "text-[var(--color-text-tertiary)]" : "text-[var(--color-text-primary)]"
+                "article-title text-[15px] font-medium line-clamp-1 flex-1",
+                isRead ? "text-[var(--color-text-secondary)]" : "text-[var(--color-text-primary)]"
               )}
             >
               {article.title}
             </h3>
-            <span className="text-xs text-[var(--color-text-tertiary)] shrink-0">
+            <span className="text-[13px] text-[var(--color-text-tertiary)] shrink-0">
               {formatRelativeTime(article.published_at)}
             </span>
           </div>
@@ -298,7 +293,7 @@ export function CompactArticleCard({
               isBookmarked && "text-amber-500"
             )}
           >
-            <Bookmark className="h-3 w-3" fill={isBookmarked ? "currentColor" : "none"} />
+            <Bookmark className="h-3.5 w-3.5" fill={isBookmarked ? "currentColor" : "none"} />
           </Button>
           <Button
             variant="ghost"
@@ -308,7 +303,7 @@ export function CompactArticleCard({
               onOpenExternal();
             }}
           >
-            <ExternalLink className="h-3 w-3" />
+            <ExternalLink className="h-3.5 w-3.5" />
           </Button>
         </div>
       </div>
