@@ -4,8 +4,9 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import type { FilterState } from "@/lib/types";
-import { SOURCE_CATEGORIES } from "@/lib/types";
+import type { FilterState, DateRange } from "@/lib/types";
+import { SOURCE_CATEGORIES, DATE_RANGE_LABELS } from "@/lib/types";
+import { cn } from "@/lib/utils";
 import {
   Search,
   X,
@@ -16,7 +17,10 @@ import {
   Share2,
   LayoutList,
   LayoutGrid,
+  Clock,
 } from "lucide-react";
+
+const QUICK_DATE_RANGES: DateRange[] = ["all", "today", "3days", "7days"];
 
 interface ToolbarProps {
   filters: FilterState;
@@ -76,6 +80,29 @@ export function Toolbar({
           )}
         </div>
 
+        {/* Quick date range filter - always visible */}
+        <div className="hidden md:flex items-center gap-1 border-l border-[var(--color-border-primary)] pl-2">
+          <Clock className="h-4 w-4 text-[var(--color-text-tertiary)] mr-1" />
+          {QUICK_DATE_RANGES.map((range) => (
+            <Button
+              key={range}
+              variant={filters.dateRange === range ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => onFiltersChange({ 
+                dateRange: range,
+                dateFrom: "",
+                dateTo: "",
+              })}
+              className={cn(
+                "h-7 px-2 text-xs",
+                filters.dateRange === range && "bg-[var(--color-accent-primary)] text-white hover:bg-[var(--color-accent-hover)]"
+              )}
+            >
+              {DATE_RANGE_LABELS[range]}
+            </Button>
+          ))}
+        </div>
+
         {/* Filter toggle */}
         <Button
           variant={showFilters ? "secondary" : "ghost"}
@@ -127,6 +154,29 @@ export function Toolbar({
         </span>
       </div>
 
+      {/* Mobile date range filter */}
+      <div className="flex md:hidden items-center gap-1 px-3 pb-2 overflow-x-auto scrollbar-hide">
+        <Clock className="h-4 w-4 text-[var(--color-text-tertiary)] shrink-0 mr-1" />
+        {QUICK_DATE_RANGES.map((range) => (
+          <Button
+            key={range}
+            variant={filters.dateRange === range ? "secondary" : "ghost"}
+            size="sm"
+            onClick={() => onFiltersChange({ 
+              dateRange: range,
+              dateFrom: "",
+              dateTo: "",
+            })}
+            className={cn(
+              "h-7 px-2 text-xs shrink-0",
+              filters.dateRange === range && "bg-[var(--color-accent-primary)] text-white hover:bg-[var(--color-accent-hover)]"
+            )}
+          >
+            {DATE_RANGE_LABELS[range]}
+          </Button>
+        ))}
+      </div>
+
       {/* Filter panel */}
       {showFilters && (
         <div className="px-3 pb-3 border-t border-[var(--color-border-secondary)] pt-3">
@@ -151,21 +201,39 @@ export function Toolbar({
             {/* Date range */}
             <div className="flex items-center gap-2">
               <CalendarDays className="h-4 w-4 text-[var(--color-text-tertiary)]" />
-              <Input
-                type="date"
-                value={filters.dateFrom}
-                onChange={(e) => onFiltersChange({ dateFrom: e.target.value })}
-                className="w-36"
-                placeholder="开始日期"
-              />
-              <span className="text-[var(--color-text-tertiary)]">-</span>
-              <Input
-                type="date"
-                value={filters.dateTo}
-                onChange={(e) => onFiltersChange({ dateTo: e.target.value })}
-                className="w-36"
-                placeholder="结束日期"
-              />
+              <Select
+                value={filters.dateRange}
+                onChange={(e) => onFiltersChange({ 
+                  dateRange: e.target.value as DateRange,
+                  dateFrom: "",
+                  dateTo: "",
+                })}
+                className="w-28"
+              >
+                {QUICK_DATE_RANGES.map((range) => (
+                  <option key={range} value={range}>{DATE_RANGE_LABELS[range]}</option>
+                ))}
+                <option value="custom">自定义</option>
+              </Select>
+              {filters.dateRange === "custom" && (
+                <>
+                  <Input
+                    type="date"
+                    value={filters.dateFrom}
+                    onChange={(e) => onFiltersChange({ dateFrom: e.target.value })}
+                    className="w-36"
+                    placeholder="开始日期"
+                  />
+                  <span className="text-[var(--color-text-tertiary)]">-</span>
+                  <Input
+                    type="date"
+                    value={filters.dateTo}
+                    onChange={(e) => onFiltersChange({ dateTo: e.target.value })}
+                    className="w-36"
+                    placeholder="结束日期"
+                  />
+                </>
+              )}
             </div>
 
             {/* Read state */}

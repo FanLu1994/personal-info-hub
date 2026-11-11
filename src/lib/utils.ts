@@ -5,11 +5,36 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function formatRelativeTime(dateStr: string | null | undefined): string {
-  if (!dateStr) return "未知";
+/**
+ * 解析发布时间字符串
+ * 处理 ISO 格式和中文格式 (如 '7 月 14 日，2026')
+ * 返回 Date 对象或 null
+ */
+export function parsePublishedAt(dateStr: string | null | undefined): Date | null {
+  if (!dateStr) return null;
   
-  const date = new Date(dateStr);
-  if (isNaN(date.getTime())) return "未知";
+  const isoDate = new Date(dateStr);
+  if (!isNaN(isoDate.getTime())) {
+    return isoDate;
+  }
+  
+  const chineseMatch = dateStr.match(/(\d+)\s*月\s*(\d+)\s*日[，,]?\s*(\d{4})/);
+  if (chineseMatch) {
+    const [, month, day, year] = chineseMatch;
+    const parsed = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+    if (!isNaN(parsed.getTime())) {
+      return parsed;
+    }
+  }
+  
+  return null;
+}
+
+export function formatRelativeTime(dateStr: string | null | undefined): string {
+  if (!dateStr) return "发布时间未知";
+  
+  const date = parsePublishedAt(dateStr);
+  if (!date) return "发布时间未知";
   
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
@@ -122,4 +147,64 @@ export function throttle<T extends (...args: Parameters<T>) => void>(
       setTimeout(() => (inThrottle = false), limit);
     }
   };
+}
+
+/**
+ * 获取 Asia/Shanghai 时区的当天开始时间 (00:00:00)
+ */
+export function getShanghaiBoundaryDate(daysAgo: number = 0): Date {
+  const now = new Date();
+  const shanghaiFormatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  
+  const shanghaiDateStr = shanghaiFormatter.format(now);
+  const [year, month, day] = shanghaiDateStr.split("-").map(Number);
+  
+  const shanghaiMidnight = new Date(Date.UTC(year, month - 1, day - daysAgo, -8, 0, 0, 0));
+  
+  return shanghaiMidnight;
+}
+
+/**
+ * 根据日期范围类型获取起始日期
+ * 返回 Asia/Shanghai 时区的自然日边界
+ * 
+ * - today: 今天 00:00 (上海时间) 至今
+ * - 3days: 2天前 00:00 (上海时间) 至今 (含今天共3天)
+ * - 7days: 6天前 00:00 (上海时间) 至今 (含今天共7天)
+ * - all: null (不限)
+ */
+export function getDateRangeStart(range: "all" | "today" | "3days" | "7days"): Date | null {
+  switch (range) {
+    case "today":
+      return getShanghaiBoundaryDate(0);
+    case "3days":
+      return getShanghaiBoundaryDate(2);
+    case "7days":
+      return getShanghaiBoundaryDate(6);
+    case "all":
+    default:
+      return null;
+  }
+}
+
+/**
+ * 检查文章发布时间是否在指定日期范围内
+ * - 如果 rangeStart 为 null，返回 true (全部)
+ * - 如果文章无有效发布时间，返回 false (限时范围不含)
+ */
+export function isArticleInDateRange(
+  publishedAt: string | null | undefined,
+  rangeStart: Date | null
+): boolean {
+  if (!rangeStart) return true;
+  
+  const pubDate = parsePublishedAt(publishedAt);
+  if (!pubDate) return false;
+  
+  return pubDate >= rangeStart;
 }

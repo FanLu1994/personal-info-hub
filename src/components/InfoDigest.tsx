@@ -12,6 +12,7 @@ import { useFilters } from "@/hooks/useFilters";
 import { useTheme } from "@/hooks/useTheme";
 import type { SourceType, Article, ViewType } from "@/lib/types";
 import { SOURCE_LABELS } from "@/lib/types";
+import { getDateRangeStart, isArticleInDateRange, parsePublishedAt } from "@/lib/utils";
 
 interface SourceStatus {
   lastSuccessAt: string | null;
@@ -159,6 +160,27 @@ export function InfoDigest() {
       result = articles.filter((a) => bookmarks.has(a.id));
     }
 
+    if (filters.dateRange !== "all" && filters.dateRange !== "custom") {
+      const rangeStart = getDateRangeStart(filters.dateRange);
+      result = result.filter((a) => isArticleInDateRange(a.published_at, rangeStart));
+    } else if (filters.dateRange === "custom") {
+      if (filters.dateFrom) {
+        const fromDate = new Date(filters.dateFrom);
+        result = result.filter((a) => {
+          const pubDate = parsePublishedAt(a.published_at);
+          return pubDate && pubDate >= fromDate;
+        });
+      }
+      if (filters.dateTo) {
+        const toDate = new Date(filters.dateTo);
+        toDate.setHours(23, 59, 59, 999);
+        result = result.filter((a) => {
+          const pubDate = parsePublishedAt(a.published_at);
+          return pubDate && pubDate <= toDate;
+        });
+      }
+    }
+
     if (filters.readState === "unread") {
       result = result.filter((a) => !isRead(a.id));
     } else if (filters.readState === "read") {
@@ -167,6 +189,15 @@ export function InfoDigest() {
 
     if (filters.sortBy === "source") {
       result = [...result].sort((a, b) => a.source_type.localeCompare(b.source_type));
+    } else {
+      result = [...result].sort((a, b) => {
+        const dateA = parsePublishedAt(a.published_at);
+        const dateB = parsePublishedAt(b.published_at);
+        if (!dateA && !dateB) return 0;
+        if (!dateA) return 1;
+        if (!dateB) return -1;
+        return dateB.getTime() - dateA.getTime();
+      });
     }
     
     if (filters.sortOrder === "asc") {
@@ -174,7 +205,7 @@ export function InfoDigest() {
     }
 
     return result;
-  }, [articles, isBookmarksView, bookmarks, filters.readState, filters.sortBy, filters.sortOrder, isRead]);
+  }, [articles, isBookmarksView, bookmarks, filters.dateRange, filters.dateFrom, filters.dateTo, filters.readState, filters.sortBy, filters.sortOrder, isRead]);
 
   const unreadCount = useMemo(() => {
     return articles.filter(a => !isRead(a.id)).length;
