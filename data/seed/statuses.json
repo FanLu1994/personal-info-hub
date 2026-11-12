@@ -1,28 +1,28 @@
 [
   {
     "source_type": "rss",
-    "last_attempt_at": "2026-11-11T08:56:49.358Z",
-    "last_success_at": "2026-11-11T08:56:49.358Z",
-    "last_error": "7/138 feeds failed",
-    "item_count": 1521
+    "last_attempt_at": "2026-11-12T05:50:20.742Z",
+    "last_success_at": "2026-11-12T05:50:20.742Z",
+    "last_error": "7/136 feeds failed",
+    "item_count": 1507
   },
   {
     "source_type": "hackernews",
-    "last_attempt_at": "2026-11-11T08:56:49.556Z",
-    "last_success_at": "2026-11-11T08:56:49.556Z",
+    "last_attempt_at": "2026-11-12T05:50:21.086Z",
+    "last_success_at": "2026-11-12T05:50:21.086Z",
     "last_error": null,
     "item_count": 30
   },
   {
     "source_type": "github",
-    "last_attempt_at": "2026-11-11T08:56:50.618Z",
-    "last_success_at": "2026-11-11T08:56:50.618Z",
+    "last_attempt_at": "2026-11-12T05:50:22.250Z",
+    "last_success_at": "2026-11-12T05:50:22.250Z",
     "last_error": null,
-    "item_count": 12
+    "item_count": 10
   },
   {
     "source_type": "linuxdo",
-    "last_attempt_at": "2026-11-11T08:56:50.699Z",
+    "last_attempt_at": "2026-11-12T05:50:22.462Z",
     "last_success_at": null,
     "last_error": "HTTP 403",
     "item_count": 0
