@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
-import type { FilterState, SourceType } from "@/lib/types";
+import type { FilterState, SourceType, DateRange } from "@/lib/types";
 import { DEFAULT_FILTER_STATE } from "@/lib/types";
 
 function parseUrlParams(): Partial<FilterState> {
@@ -21,11 +21,22 @@ function parseUrlParams(): Partial<FilterState> {
   const search = params.get("q");
   if (search) filters.search = search;
   
+  const dateRange = params.get("range");
+  if (dateRange && ["all", "today", "3days", "7days", "custom"].includes(dateRange)) {
+    filters.dateRange = dateRange as DateRange;
+  }
+  
   const dateFrom = params.get("from");
-  if (dateFrom) filters.dateFrom = dateFrom;
+  if (dateFrom) {
+    filters.dateFrom = dateFrom;
+    if (!dateRange) filters.dateRange = "custom";
+  }
   
   const dateTo = params.get("to");
-  if (dateTo) filters.dateTo = dateTo;
+  if (dateTo) {
+    filters.dateTo = dateTo;
+    if (!dateRange) filters.dateRange = "custom";
+  }
   
   const readState = params.get("read");
   if (readState && ["all", "unread", "read"].includes(readState)) {
@@ -51,8 +62,11 @@ function filtersToUrlParams(filters: FilterState): URLSearchParams {
   if (filters.source !== "all") params.set("source", filters.source);
   if (filters.category) params.set("category", filters.category);
   if (filters.search) params.set("q", filters.search);
-  if (filters.dateFrom) params.set("from", filters.dateFrom);
-  if (filters.dateTo) params.set("to", filters.dateTo);
+  if (filters.dateRange !== "all") params.set("range", filters.dateRange);
+  if (filters.dateRange === "custom") {
+    if (filters.dateFrom) params.set("from", filters.dateFrom);
+    if (filters.dateTo) params.set("to", filters.dateTo);
+  }
   if (filters.readState !== "all") params.set("read", filters.readState);
   if (filters.sortBy !== "date") params.set("sort", filters.sortBy);
   if (filters.sortOrder !== "desc") params.set("order", filters.sortOrder);
@@ -102,6 +116,7 @@ export function useFilters() {
     filters.source !== "all" ||
     filters.category !== "" ||
     filters.search !== "" ||
+    filters.dateRange !== "all" ||
     filters.dateFrom !== "" ||
     filters.dateTo !== "" ||
     filters.readState !== "all";

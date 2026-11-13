@@ -86,10 +86,21 @@ export const QUALITY_LABELS: Record<ContentQuality, string> = {
 
 export type ViewType = SourceType | "all" | "bookmarks";
 
+export type DateRange = "all" | "today" | "3days" | "7days" | "custom";
+
+export const DATE_RANGE_LABELS: Record<DateRange, string> = {
+  all: "全部时间",
+  today: "今天",
+  "3days": "近三天",
+  "7days": "近一周",
+  custom: "自定义",
+};
+
 export interface FilterState {
   source: SourceType | "all";
   category: string;
   search: string;
+  dateRange: DateRange;
   dateFrom: string;
   dateTo: string;
   readState: "all" | "unread" | "read";
@@ -101,6 +112,7 @@ export const DEFAULT_FILTER_STATE: FilterState = {
   source: "all",
   category: "",
   search: "",
+  dateRange: "all",
   dateFrom: "",
   dateTo: "",
   readState: "all",
